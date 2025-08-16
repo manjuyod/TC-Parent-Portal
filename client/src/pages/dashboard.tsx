@@ -32,6 +32,11 @@ export default function Dashboard() {
 
   const { students, sessions, billing } = dashboardData;
 
+  // Filter sessions based on selected student
+  const filteredSessions = selectedStudent && sessions 
+    ? sessions.filter((session: any) => session.studentName === selectedStudent)
+    : [];
+
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -97,17 +102,16 @@ export default function Dashboard() {
           <h3 style={{ marginBottom: "30px" }}>Schedule Management</h3>
 
           {/* Current Schedule */}
-          {sessions && sessions.length > 0 ? (
+          {filteredSessions && filteredSessions.length > 0 ? (
             <div className="card mb-4">
               <div className="card-header">
-                <h5>Current Schedule ({sessions.length} sessions)</h5>
+                <h5>Current Schedule for {selectedStudent} ({filteredSessions.length} sessions)</h5>
               </div>
               <div className="card-body">
                 <div className="table-container">
                   <table className="table table-striped table-sm">
                     <thead>
                       <tr>
-                        <th>Student</th>
                         <th>Day</th>
                         <th>Time</th>
                         <th>Date</th>
@@ -115,9 +119,8 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sessions.map((session: any, index: number) => (
+                      {filteredSessions.map((session: any, index: number) => (
                         <tr key={index}>
-                          <td>{session.studentName}</td>
                           <td>{session.Day || 'N/A'}</td>
                           <td>{session.Time || 'N/A'}</td>
                           <td>{session.FormattedDate || 'N/A'}</td>
@@ -129,9 +132,13 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
+          ) : selectedStudent ? (
+            <div className="alert alert-info">
+              No scheduled sessions found for {selectedStudent}.
+            </div>
           ) : (
             <div className="alert alert-info">
-              No scheduled sessions found for your students.
+              Please select a student to view their schedule.
             </div>
           )}
 
@@ -384,9 +391,9 @@ export default function Dashboard() {
                 </h6>
               </div>
               <div className="card-body">
-                {sessions && sessions.length > 0 ? (
+                {selectedStudent && filteredSessions && filteredSessions.length > 0 ? (
                   <div className="timeline-container" style={{ maxHeight: "300px", overflowY: "auto" }}>
-                    {sessions.filter((session: any) => session && session.category === 'recent').slice(0, 5).map((session: any, index: number) => (
+                    {filteredSessions.filter((session: any) => session && session.category === 'recent').slice(0, 5).map((session: any, index: number) => (
                       <div key={index} className="timeline-item mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
                         <div className="d-flex">
                           <div className="timeline-marker me-3 mt-1">
@@ -401,9 +408,13 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
+                ) : selectedStudent ? (
+                  <div className="alert alert-info small">
+                    No recent sessions found for {selectedStudent}.
+                  </div>
                 ) : (
                   <div className="alert alert-info small">
-                    No recent sessions found.
+                    Select a student to view recent sessions.
                   </div>
                 )}
               </div>
@@ -418,26 +429,33 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  {sessions && sessions.length > 0 ? (
-                    sessions.slice(0, 4).map((session: any, index: number) => (
-                      <div key={index} className="session-item mb-3 p-2" style={{ background: "rgba(74, 122, 166, 0.05)", borderRadius: "6px", borderLeft: "3px solid var(--tutoring-orange)" }}>
-                        <div className="d-flex justify-content-between align-items-start">
-                          <div>
-                            <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                            <p className="mb-0 small text-muted">{session?.FormattedDate || 'N/A'}</p>
-                          </div>
-                          <div className="text-end">
-                            <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
-                              {session?.Day || 'N/A'}
-                            </span>
-                            <p className="mb-0 small text-muted">{session?.Time || 'N/A'}</p>
+                  {selectedStudent && filteredSessions && filteredSessions.length > 0 ? (
+                    filteredSessions
+                      .filter((session: any) => session && session.category === 'upcoming')
+                      .slice(0, 4)
+                      .map((session: any, index: number) => (
+                        <div key={index} className="session-item mb-3 p-2" style={{ background: "rgba(74, 122, 166, 0.05)", borderRadius: "6px", borderLeft: "3px solid var(--tutoring-orange)" }}>
+                          <div className="d-flex justify-content-between align-items-start">
+                            <div>
+                              <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
+                              <p className="mb-0 small text-muted">{session?.FormattedDate || 'N/A'}</p>
+                            </div>
+                            <div className="text-end">
+                              <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
+                                {session?.Day || 'N/A'}
+                              </span>
+                              <p className="mb-0 small text-muted">{session?.Time || 'N/A'}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      ))
+                  ) : selectedStudent ? (
+                    <div className="alert alert-info small">
+                      No upcoming sessions found for {selectedStudent}.
+                    </div>
                   ) : (
                     <div className="alert alert-info small">
-                      No upcoming sessions found.
+                      Select a student to view upcoming sessions.
                     </div>
                   )}
                 </div>

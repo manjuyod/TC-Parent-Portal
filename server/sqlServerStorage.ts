@@ -219,8 +219,6 @@ export async function getSessions(studentId: number) {
         let sessionDate: Date | null = null;
 
         if (session.ScheduleDate) {
-          console.log('Processing ScheduleDate:', session.ScheduleDate, 'Type:', typeof session.ScheduleDate);
-          
           if (session.ScheduleDate instanceof Date) {
             sessionDate = session.ScheduleDate;
           } else if (typeof session.ScheduleDate === "string") {
@@ -229,12 +227,9 @@ export async function getSessions(studentId: number) {
             // Handle other types - convert to string first
             sessionDate = new Date(session.ScheduleDate.toString());
           }
-          
-          console.log('Parsed sessionDate:', sessionDate, 'Valid:', !isNaN(sessionDate.getTime()));
         }
 
         if (!sessionDate || isNaN(sessionDate.getTime())) {
-          console.log('Skipping invalid session date:', session.ScheduleDate);
           continue;
         }
 
