@@ -7,6 +7,7 @@ The portal provides functionality for parent authentication using email and phon
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
+Data loading priority: Students first (immediate), sessions second (on-demand), billing last (tab-specific only).
 
 ## Recent Changes (August 2025)
 - Updated authentication system to use email as username and phone number as password

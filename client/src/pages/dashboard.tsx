@@ -36,10 +36,10 @@ export default function Dashboard() {
   // Load sessions only when needed (on schedule tab or student selection)
   const { data: sessionsData } = useQuery({
     queryKey: ["/api/sessions", selectedStudent],
-    enabled: !!user && (activeTab === "home" && selectedStudent || activeTab === "schedule"),
+    enabled: !!user && ((activeTab === "home" && !!selectedStudent) || activeTab === "schedule"),
   });
 
-  // Load billing only when billing tab is active (heaviest query)
+  // Load billing only when billing tab is active (heaviest query - last priority)
   const { data: billingData } = useQuery({
     queryKey: ["/api/billing"],
     enabled: !!user && activeTab === "billing",
@@ -57,7 +57,21 @@ export default function Dashboard() {
           <div className="spinner-border text-primary mb-4" role="status">
             <span className="visually-hidden">Loading...</span>
           </div>
-          <p className="text-muted">Loading...</p>
+          <p className="text-muted">Loading your account...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show students loading state if students haven't loaded yet
+  if (!studentsData) {
+    return (
+      <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
+        <div className="text-center">
+          <div className="spinner-border text-primary mb-4" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </div>
+          <p className="text-muted">Loading student information...</p>
         </div>
       </div>
     );
