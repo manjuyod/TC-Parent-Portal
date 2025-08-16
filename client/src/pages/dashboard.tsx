@@ -34,13 +34,13 @@ export default function Dashboard() {
   });
 
   // Load recent sessions only when needed
-  const { data: recentSessionsData } = useQuery({
+  const { data: recentSessionsData, isLoading: isLoadingRecent, error: recentError } = useQuery({
     queryKey: ["/api/sessions/recent", selectedStudent],
     enabled: !!user && !!selectedStudent,
   });
 
   // Load upcoming sessions only when needed  
-  const { data: upcomingSessionsData } = useQuery({
+  const { data: upcomingSessionsData, isLoading: isLoadingUpcoming, error: upcomingError } = useQuery({
     queryKey: ["/api/sessions/upcoming", selectedStudent],
     enabled: !!user && !!selectedStudent,
   });
@@ -778,7 +778,21 @@ export default function Dashboard() {
                 </h6>
               </div>
               <div className="card-body">
-                {selectedStudent && recentSessions && recentSessions.length > 0 ? (
+                {!selectedStudent ? (
+                  <div className="alert alert-info small">
+                    Select a student to view recent sessions.
+                  </div>
+                ) : isLoadingRecent ? (
+                  <div className="d-flex justify-content-center p-3">
+                    <div className="spinner-border text-primary" role="status">
+                      <span className="visually-hidden">Loading recent sessions...</span>
+                    </div>
+                  </div>
+                ) : recentError ? (
+                  <div className="alert alert-danger small">
+                    Error loading recent sessions. Please try again.
+                  </div>
+                ) : recentSessions && recentSessions.length > 0 ? (
                   <div
                     className="timeline-container"
                     style={{ maxHeight: "300px", overflowY: "auto" }}
@@ -821,13 +835,9 @@ export default function Dashboard() {
                         </div>
                       ))}
                   </div>
-                ) : selectedStudent ? (
-                  <div className="alert alert-info small">
-                    No recent sessions found for {selectedStudent}.
-                  </div>
                 ) : (
                   <div className="alert alert-info small">
-                    Select a student to view recent sessions.
+                    No recent sessions found for {selectedStudent}.
                   </div>
                 )}
               </div>
@@ -848,7 +858,21 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  {selectedStudent && upcomingSessions && upcomingSessions.length > 0 ? (
+                  {!selectedStudent ? (
+                    <div className="alert alert-info small">
+                      Select a student to view upcoming sessions.
+                    </div>
+                  ) : isLoadingUpcoming ? (
+                    <div className="d-flex justify-content-center p-3">
+                      <div className="spinner-border text-primary" role="status">
+                        <span className="visually-hidden">Loading upcoming sessions...</span>
+                      </div>
+                    </div>
+                  ) : upcomingError ? (
+                    <div className="alert alert-danger small">
+                      Error loading upcoming sessions. Please try again.
+                    </div>
+                  ) : upcomingSessions && upcomingSessions.length > 0 ? (
                     upcomingSessions
                       .slice(0, 4)
                       .map((session: any, index: number) => (
@@ -890,13 +914,9 @@ export default function Dashboard() {
                           </div>
                         </div>
                       ))
-                  ) : selectedStudent ? (
-                    <div className="alert alert-info small">
-                      No upcoming sessions found for {selectedStudent}.
-                    </div>
                   ) : (
                     <div className="alert alert-info small">
-                      Select a student to view upcoming sessions.
+                      No upcoming sessions found for {selectedStudent}.
                     </div>
                   )}
                 </div>

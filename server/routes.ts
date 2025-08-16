@@ -161,21 +161,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const studentsInfo = inquiryData.students;
       const recentSessions: any[] = [];
 
-      // If specific student requested, get only their sessions
-      if (studentId) {
-        const student = studentsInfo.find((s: any) => s.ID.toString() === studentId);
-        if (student) {
-          const studentSessions = await getSessions(student.ID);
-          studentSessions.forEach((session: any) => {
-            if (session.category === "recent") {
-              session.studentName = `${student.FirstName} ${student.LastName}`;
-              session.studentId = student.ID;
-              recentSessions.push(session);
-            }
-          });
-        }
-      } else {
-        // Get sessions for all students
+      // Find student by name (the frontend passes the selected student name)
+      const selectedStudentName = studentId; // This is actually the student name from the frontend
+      let targetStudent = null;
+      
+      if (selectedStudentName) {
+        targetStudent = studentsInfo.find((s: any) => 
+          `${s.FirstName} ${s.LastName}` === selectedStudentName
+        );
+      }
+
+      if (targetStudent) {
+        const studentSessions = await getSessions(targetStudent.ID);
+        studentSessions.forEach((session: any) => {
+          if (session.category === "recent") {
+            session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
+            session.studentId = targetStudent.ID;
+            recentSessions.push(session);
+          }
+        });
+      } else if (!selectedStudentName) {
+        // Get sessions for all students if no specific student
         for (const student of studentsInfo) {
           const studentSessions = await getSessions(student.ID);
           studentSessions.forEach((session: any) => {
@@ -212,21 +218,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const studentsInfo = inquiryData.students;
       const upcomingSessions: any[] = [];
 
-      // If specific student requested, get only their sessions
-      if (studentId) {
-        const student = studentsInfo.find((s: any) => s.ID.toString() === studentId);
-        if (student) {
-          const studentSessions = await getSessions(student.ID);
-          studentSessions.forEach((session: any) => {
-            if (session.category === "upcoming") {
-              session.studentName = `${student.FirstName} ${student.LastName}`;
-              session.studentId = student.ID;
-              upcomingSessions.push(session);
-            }
-          });
-        }
-      } else {
-        // Get sessions for all students
+      // Find student by name (the frontend passes the selected student name)
+      const selectedStudentName = studentId; // This is actually the student name from the frontend
+      let targetStudent = null;
+      
+      if (selectedStudentName) {
+        targetStudent = studentsInfo.find((s: any) => 
+          `${s.FirstName} ${s.LastName}` === selectedStudentName
+        );
+      }
+
+      if (targetStudent) {
+        const studentSessions = await getSessions(targetStudent.ID);
+        studentSessions.forEach((session: any) => {
+          if (session.category === "upcoming") {
+            session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
+            session.studentId = targetStudent.ID;
+            upcomingSessions.push(session);
+          }
+        });
+      } else if (!selectedStudentName) {
+        // Get sessions for all students if no specific student
         for (const student of studentsInfo) {
           const studentSessions = await getSessions(student.ID);
           studentSessions.forEach((session: any) => {
