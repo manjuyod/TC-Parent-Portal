@@ -13,6 +13,10 @@ Preferred communication style: Simple, everyday language.
 - Connected to existing SQL Server database using legacy table structure (tblInquiry, tblstudents, tblSessionSchedule)
 - Implemented SQL Server storage functions with error handling for stored procedures
 - Added Tutoring Club branding with official logo and color scheme
+- **Implemented comprehensive multi-provider email service** with Resend, SendGrid, and Gmail SMTP support
+- Added email health check endpoint (/v1/email/health) and test endpoint (/v1/email/test)
+- Replaced legacy Gmail API service account approach with more reliable SMTP/API-based email providers
+- Added retry logic, error handling, and proper email templating for schedule change notifications
 
 # System Architecture
 
