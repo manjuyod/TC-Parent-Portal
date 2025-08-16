@@ -7,6 +7,8 @@ import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState("home");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const { data: user } = useQuery({
     queryKey: ["/api/auth/me"],
@@ -48,6 +50,18 @@ export default function Dashboard() {
       console.error("Logout error:", error);
     }
   };
+
+  // Pagination functions
+  const getCurrentPageItems = () => {
+    if (!billing?.account_details) return [];
+    if (itemsPerPage >= billing.account_details.length) return billing.account_details;
+    
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return billing.account_details.slice(startIndex, endIndex);
+  };
+
+  const totalPages = billing?.account_details ? Math.ceil(billing.account_details.length / itemsPerPage) : 1;
 
   if (activeTab === "schedule") {
     return (
@@ -375,23 +389,43 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div className="table-container">
+                  <div className="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                      <label className="form-label me-2">Show:</label>
+                      <select 
+                        className="form-select form-select-sm d-inline-block w-auto"
+                        value={itemsPerPage}
+                        onChange={(e) => {
+                          setItemsPerPage(Number(e.target.value));
+                          setCurrentPage(1);
+                        }}
+                      >
+                        <option value={50}>50 items</option>
+                        <option value={100}>100 items</option>
+                        <option value={200}>200 items</option>
+                        <option value={billing.account_details.length}>All items</option>
+                      </select>
+                    </div>
+                    <div className="text-muted small">
+                      Showing {Math.min((currentPage - 1) * itemsPerPage + 1, billing.account_details.length)} - {Math.min(currentPage * itemsPerPage, billing.account_details.length)} of {billing.account_details.length} records
+                    </div>
+                  </div>
+                  
                   <table className="table table-striped table-sm">
                     <thead>
                       <tr>
                         <th>Date</th>
                         <th>Student</th>
                         <th>Event Type</th>
-                        <th>Attendance</th>
                         <th>Adjustment</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {billing.account_details.map((detail: any, index: number) => (
+                      {getCurrentPageItems().map((detail: any, index: number) => (
                         <tr key={index}>
                           <td>{detail.FormattedDate || "N/A"}</td>
                           <td>{detail.Student || "N/A"}</td>
                           <td>{detail.EventType || "N/A"}</td>
-                          <td>{detail.Attendance || "N/A"}</td>
                           <td>
                             <span className={detail.Adjustment > 0 ? "text-success" : detail.Adjustment < 0 ? "text-danger" : ""}>
                               {detail.Adjustment > 0 ? "+" : ""}{detail.Adjustment || 0}
@@ -401,6 +435,51 @@ export default function Dashboard() {
                       ))}
                     </tbody>
                   </table>
+                  
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <nav aria-label="Account details pagination" className="mt-3">
+                      <ul className="pagination pagination-sm justify-content-center">
+                        <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
+                          <button 
+                            className="page-link" 
+                            onClick={() => setCurrentPage(currentPage - 1)}
+                            disabled={currentPage === 1}
+                          >
+                            Previous
+                          </button>
+                        </li>
+                        
+                        {/* Page numbers */}
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                          const pageNum = Math.max(1, Math.min(totalPages - 4, currentPage - 2)) + i;
+                          if (pageNum <= totalPages) {
+                            return (
+                              <li key={pageNum} className={`page-item ${currentPage === pageNum ? 'active' : ''}`}>
+                                <button 
+                                  className="page-link" 
+                                  onClick={() => setCurrentPage(pageNum)}
+                                >
+                                  {pageNum}
+                                </button>
+                              </li>
+                            );
+                          }
+                          return null;
+                        })}
+                        
+                        <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
+                          <button 
+                            className="page-link" 
+                            onClick={() => setCurrentPage(currentPage + 1)}
+                            disabled={currentPage === totalPages}
+                          >
+                            Next
+                          </button>
+                        </li>
+                      </ul>
+                    </nav>
+                  )}
                 </div>
               </div>
             </div>
