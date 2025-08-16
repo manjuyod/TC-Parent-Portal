@@ -173,18 +173,26 @@ export async function getSessions(studentId: number) {
         const formattedTime = timeId ? await getTime(timeId) : "Unknown";
         session.Time = formattedTime;
 
-        // Normalize ScheduleDate
+        // Normalize ScheduleDate with better logging
         let sessionDate: Date | null = null;
 
         if (session.ScheduleDate) {
+          console.log('Processing ScheduleDate:', session.ScheduleDate, 'Type:', typeof session.ScheduleDate);
+          
           if (session.ScheduleDate instanceof Date) {
             sessionDate = session.ScheduleDate;
           } else if (typeof session.ScheduleDate === "string") {
             sessionDate = new Date(session.ScheduleDate);
+          } else {
+            // Handle other types - convert to string first
+            sessionDate = new Date(session.ScheduleDate.toString());
           }
+          
+          console.log('Parsed sessionDate:', sessionDate, 'Valid:', !isNaN(sessionDate.getTime()));
         }
 
         if (!sessionDate || isNaN(sessionDate.getTime())) {
+          console.log('Skipping invalid session date:', session.ScheduleDate);
           continue;
         }
 
@@ -196,8 +204,13 @@ export async function getSessions(studentId: number) {
           continue;
         }
 
-        // Save formatted date and day
-        session.FormattedDate = sessionDate.toISOString().split("T")[0];
+        // Save formatted date and day - using proper date formatting
+        session.FormattedDate = sessionDate.toLocaleDateString("en-US", {
+          weekday: "long",
+          year: "numeric", 
+          month: "long",
+          day: "numeric"
+        });
         if (!session.Day || session.Day.trim() === "") {
           session.Day = sessionDate.toLocaleDateString("en-US", {
             weekday: "long",

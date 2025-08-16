@@ -37,7 +37,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Login endpoint
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { email, contactPhone } = loginSchema.parse(req.body);
+      const { email, contactPhone } = req.body;
+      console.log('Login attempt:', { email, contactPhone });
       
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
