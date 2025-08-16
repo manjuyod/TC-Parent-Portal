@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest } from "./sqlServerStorage";
+import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest, getFranchiseCenterEmail } from "./sqlServerStorage";
 import { loginSchema } from "@shared/schema";
 import session from "express-session";
 
@@ -179,6 +179,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Dashboard error:', error);
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get franchise center email for inquiry
+  app.get("/v1/inquiries/:inquiryId/center-email", requireAuth, async (req, res) => {
+    try {
+      const inquiryId = req.params.inquiryId;
+      
+      // Validate inquiryId is a number
+      if (!inquiryId || isNaN(Number(inquiryId))) {
+        return res.status(400).json({ error: "Invalid inquiry ID" });
+      }
+
+      // Verify the inquiry belongs to the authenticated parent
+      if (req.session.inquiryId !== parseInt(inquiryId)) {
+        return res.status(403).json({ error: "Unauthorized access to inquiry" });
+      }
+
+      // Rate limiting check - basic implementation
+      const now = Date.now();
+      const rateLimitKey = `rate_limit_${req.session.parentId}`;
+      req.session[rateLimitKey] = req.session[rateLimitKey] || [];
+      const requests = req.session[rateLimitKey].filter((time: number) => now - time < 60000); // 1 minute window
+      
+      if (requests.length >= 10) { // Max 10 requests per minute
+        return res.status(429).json({ error: "Rate limit exceeded" });
+      }
+      
+      requests.push(now);
+      req.session[rateLimitKey] = requests;
+
+      const email = await getFranchiseCenterEmail(parseInt(inquiryId));
+      
+      if (!email) {
+        return res.status(404).json({ error: "Center email not found" });
+      }
+      
+      res.json({ email });
+    } catch (error) {
+      console.error('Get center email error:', error);
+      res.status(500).json({ error: "Internal server error" });
     }
   });
 
