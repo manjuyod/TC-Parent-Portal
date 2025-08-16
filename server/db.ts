@@ -1,11 +1,37 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Client } from "pg";
+import sql from 'mssql';
 
-// Create a PostgreSQL client for this template
-// In production, you would use the SQL Server connection from the attached file
-const client = new Client({
-  connectionString: process.env.DATABASE_URL || "postgresql://localhost:5432/tutoring_portal",
-});
+// SQL Server configuration using Replit secrets
+const config: sql.config = {
+  server: process.env.CRMSrvAddress || '',
+  database: process.env.CRMSrvDb || '',
+  user: process.env.CRMSrvUs || '',
+  password: process.env.CRMSrvPs || '',
+  options: {
+    encrypt: true,
+    trustServerCertificate: true,
+    enableArithAbort: true,
+  },
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000,
+  },
+};
 
-await client.connect();
-export const db = drizzle(client);
+// Create connection pool
+export const pool = new sql.ConnectionPool(config);
+
+// Connect to the database
+export async function connectToDatabase() {
+  try {
+    await pool.connect();
+    console.log('Connected to SQL Server database');
+    return pool;
+  } catch (err) {
+    console.error('Database connection failed:', err);
+    throw err;
+  }
+}
+
+// Initialize connection
+connectToDatabase().catch(console.error);

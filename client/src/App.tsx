@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useQuery } from "@tanstack/react-query";
+import React from "react";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
@@ -15,6 +16,17 @@ function AuthCheck({ children }: { children: React.ReactNode }) {
     queryKey: ["/api/auth/me"],
     retry: false,
   });
+
+  // Always call useEffect at the top level
+  React.useEffect(() => {
+    if (!isLoading) {
+      if (!user && location !== "/login") {
+        navigate("/login");
+      } else if (user && location === "/login") {
+        navigate("/");
+      }
+    }
+  }, [user, location, navigate, isLoading]);
 
   if (isLoading) {
     return (
@@ -28,12 +40,10 @@ function AuthCheck({ children }: { children: React.ReactNode }) {
   }
 
   if (!user && location !== "/login") {
-    navigate("/login");
     return null;
   }
 
   if (user && location === "/login") {
-    navigate("/");
     return null;
   }
 

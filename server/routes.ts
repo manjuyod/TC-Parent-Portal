@@ -1,12 +1,15 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { loginSchema, insertScheduleChangeRequestSchema } from "@shared/schema";
+import { findInquiryByContactPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest } from "./sqlServerStorage";
+import { loginSchema } from "@shared/schema";
 import session from "express-session";
 
 declare module "express-session" {
   interface SessionData {
     parentId?: string;
+    inquiryId?: number;
+    contactPhone?: string;
+    studentIds?: number[];
   }
 }
 
@@ -35,14 +38,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { contactPhone } = loginSchema.parse(req.body);
       
-      const parent = await storage.getParentByPhone(contactPhone);
-      if (!parent) {
+      const inquiryData = await findInquiryByContactPhone(contactPhone);
+      if (!inquiryData) {
         return res.status(401).json({ message: "Invalid phone number. Please contact your tutoring center." });
       }
 
-      req.session.parentId = parent.id;
-      res.json({ success: true, parent: { id: parent.id, name: parent.name } });
+      const parentInfo = inquiryData.inquiry;
+      const studentsInfo = inquiryData.students;
+
+      // Store session data
+      req.session.contactPhone = contactPhone;
+      req.session.inquiryId = parentInfo.InquiryID;
+      req.session.parentId = parentInfo.InquiryID.toString();
+      req.session.studentIds = studentsInfo.map((s: any) => s.ID);
+
+      res.json({ 
+        success: true, 
+        parent: { 
+          id: parentInfo.InquiryID, 
+          name: parentInfo.Email || 'Parent',
+          contactPhone: parentInfo.ContactPhone
+        },
+        studentsCount: studentsInfo.length
+      });
     } catch (error) {
+      console.error('Login error:', error);
       res.status(400).json({ message: "Invalid input" });
     }
   });
@@ -60,20 +80,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get current user
   app.get("/api/auth/me", requireAuth, async (req, res) => {
     try {
-      const parentId = req.session.parentId!;
-      const parent = await storage.getParentByPhone("(555) 123-4567"); // This would be looked up by ID in real implementation
+      const contactPhone = req.session.contactPhone!;
+      const studentIds = req.session.studentIds || [];
       
-      if (!parent) {
+      const inquiryData = await findInquiryByContactPhone(contactPhone);
+      if (!inquiryData) {
         return res.status(404).json({ message: "Parent not found" });
       }
 
-      const students = await storage.getStudentsByParentId(parentId);
+      const parentInfo = inquiryData.inquiry;
+      const studentsInfo = inquiryData.students;
       
       res.json({
-        parent: { id: parent.id, name: parent.name, contactPhone: parent.contactPhone },
-        students: students.map(s => ({ id: s.id, name: s.name, grade: s.grade, subject: s.subject, status: s.status, progress: s.progress }))
+        parent: { 
+          id: parentInfo.InquiryID, 
+          name: parentInfo.Email || 'Parent', 
+          contactPhone: parentInfo.ContactPhone 
+        },
+        students: studentsInfo.map((s: any) => ({ 
+          id: s.ID, 
+          name: `${s.FirstName} ${s.LastName}`,
+          grade: 'N/A', // Not available in legacy structure
+          subject: 'N/A', // Not available in legacy structure  
+          status: 'active',
+          progress: 0 // Not available in legacy structure
+        }))
       });
     } catch (error) {
+      console.error('Get user error:', error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -81,43 +115,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get dashboard data
   app.get("/api/dashboard", requireAuth, async (req, res) => {
     try {
-      const parentId = req.session.parentId!;
+      const inquiryId = req.session.inquiryId!;
+      const studentIds = req.session.studentIds || [];
+      const contactPhone = req.session.contactPhone!;
       
-      const students = await storage.getStudentsByParentId(parentId);
-      const studentIds = students.map(s => s.id);
-      const sessions = await storage.getSessionsByStudentIds(studentIds);
-      const billingInfo = await storage.getBillingInfoByParentId(parentId);
-      const transactions = await storage.getTransactionsByParentId(parentId);
+      // Get parent and student info
+      const inquiryData = await findInquiryByContactPhone(contactPhone);
+      if (!inquiryData) {
+        return res.status(404).json({ message: "Parent data not found" });
+      }
 
-      // Calculate sessions this month (mock calculation)
-      const sessionsThisMonth = sessions.length * 4; // Assuming weekly sessions
+      const studentsInfo = inquiryData.students;
+      
+      // Get all sessions for all students
+      const allSessions: any[] = [];
+      for (const student of studentsInfo) {
+        const studentSessions = await getSessions(student.ID);
+        studentSessions.forEach((session: any) => {
+          session.studentName = `${student.FirstName} ${student.LastName}`;
+          session.studentId = student.ID;
+        });
+        allSessions.push(...studentSessions);
+      }
+
+      // Get billing information
+      const billingInfo = await getHoursBalance(inquiryId);
+      
+      // Calculate sessions this month
+      const sessionsThisMonth = allSessions.length;
 
       res.json({
-        students: students.map(student => {
-          const studentSessions = sessions.filter(s => s.studentId === student.id);
+        students: studentsInfo.map((student: any) => {
+          const studentSessions = allSessions.filter(s => s.studentId === student.ID);
           const nextSession = studentSessions.length > 0 ? 
-            `${studentSessions[0].dayOfWeek} ${studentSessions[0].startTime}` : 
+            `${studentSessions[0].Day} ${studentSessions[0].Time}` : 
             "No sessions scheduled";
           
           return {
-            ...student,
+            id: student.ID,
+            name: `${student.FirstName} ${student.LastName}`,
+            grade: 'N/A',
+            subject: 'N/A',
+            status: 'active',
+            progress: 0,
             nextSession,
           };
         }),
-        sessions: sessions.map(session => {
-          const student = students.find(s => s.id === session.studentId);
-          return {
-            ...session,
-            studentName: student?.name || "Unknown",
-          };
-        }),
+        sessions: allSessions,
         billing: billingInfo ? {
-          ...billingInfo,
+          currentBalance: '0.00',
+          monthlyRate: '320.00',
+          nextPaymentDate: 'N/A',
+          paymentMethod: 'N/A',
           sessionsThisMonth,
+          ...billingInfo
         } : null,
-        transactions: transactions.slice(0, 10), // Latest 10 transactions
+        transactions: [], // No transaction data in legacy structure
       });
     } catch (error) {
+      console.error('Dashboard error:', error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -125,22 +181,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Submit schedule change request
   app.post("/api/schedule-change-request", requireAuth, async (req, res) => {
     try {
-      const requestData = insertScheduleChangeRequestSchema.parse(req.body);
+      const { studentId, currentSession, preferredDate, preferredTime, requestedChange, reason } = req.body;
+      const studentIds = req.session.studentIds || [];
       
       // Verify the student belongs to the authenticated parent
-      const student = await storage.getStudentById(requestData.studentId);
-      if (!student || student.parentId !== req.session.parentId) {
+      if (!studentIds.includes(parseInt(studentId))) {
         return res.status(403).json({ message: "Unauthorized access to student" });
       }
 
-      const request = await storage.createScheduleChangeRequest(requestData);
-      
-      res.json({ 
-        success: true, 
-        message: "Schedule change request submitted successfully!",
-        request 
+      const result = await submitScheduleChangeRequest({
+        studentId: parseInt(studentId),
+        currentSession,
+        preferredDate,
+        preferredTime,
+        requestedChange,
+        reason
       });
+      
+      if (result.error) {
+        return res.status(400).json({ message: result.error });
+      }
+      
+      res.json(result);
     } catch (error) {
+      console.error('Schedule change request error:', error);
       res.status(400).json({ message: "Invalid request data" });
     }
   });

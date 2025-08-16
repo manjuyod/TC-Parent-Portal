@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
+import logoPath from "@assets/logo_1755332058201.webp";
 
 interface HeaderProps {
   username: string;
@@ -28,7 +29,7 @@ export default function Header({ username, students }: HeaderProps) {
         <div className="flex justify-between items-center py-4">
           <div className="flex items-center space-x-4">
             <img 
-              src="https://images.unsplash.com/photo-1606761568499-6d2451b23c66?ixlib=rb-4.0.3&auto=format&fit=crop&w=60&h=60" 
+              src={logoPath} 
               alt="Tutoring Club Logo" 
               className="h-12 w-auto"
             />
