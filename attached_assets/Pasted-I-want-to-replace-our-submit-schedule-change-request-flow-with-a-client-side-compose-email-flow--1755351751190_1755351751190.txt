@@ -1,0 +1,95 @@
+I want to replace our “submit schedule change request” flow with a client-side “compose email” flow that prefers the Gmail app on mobile, then Gmail web, then mailto. Please implement both server & client pieces below as small, focused commits.
+
+========================================
+SERVER (Node/TS or JS) – dynamic “to” email
+========================================
+Goal: expose an endpoint that returns the franchise center email address for a given InquiryID, using this SQL (verbatim text is intentional):
+
+(SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FrachiesID FROM tblInquiry WHERE ID = @InquiryID))
+
+Instructions:
+1) Create a route: GET /v1/inquiries/:inquiryId/center-email
+   - Validates :inquiryId is a number/string id.
+   - Runs the query above using our DB client (if none exists, create a small db module with a placeholder and a clear TODO to wire real DB). Use parameter binding for @InquiryID (no string concat).
+   - Returns { email: "center@example.com" } or 404 { error: "not found" }.
+   - Add basic error handling and 429 (rate-limit) to the route.
+
+2) Add a quick unit/integration test (or a stub test) asserting:
+   - 200 path returns an email string
+   - 404 for unknown inquiryId
+
+========================================
+CLIENT (React/TS) – helpers & button
+========================================
+Goal: create helpers to build compose links, and a component that:
+- fetches the center email from /v1/inquiries/:inquiryId/center-email
+- on click, opens Gmail app on mobile if possible; otherwise Gmail web compose; otherwise mailto.
+
+Create file: src/email.ts
+Export these builder functions:
+- buildMailto({ to, cc, bcc, subject, body }) -> string (mailto:…)
+- buildGmailWebCompose({ to, cc, bcc, subject, body }) -> string
+  // https://mail.google.com/mail/?view=cm&fs=1&to=...&cc=...&bcc=...&su=...&body=...
+- buildGmailAppCompose({ to, subject, body }) -> string
+  // Use native app deep links:
+  // iOS:  googlegmail://co?to=...&subject=...&body=...
+  // Android fallback: gmail://co?to=...&subject=...&body=...
+  // Use CRLF (\r\n) in body; URL-encode all params.
+
+Also export a utility:
+- openWithPreference(links: { gmailApp?: string; gmailWeb?: string; mailto: string }): void
+  Behavior (priority & fallbacks):
+  1) If mobile (userAgent includes iPhone|iPad|iPod|Android), attempt to open Gmail app link first:
+     - Try window.location.href = gmailApp (or using an <a> click). Immediately set a short timeout (e.g., 600–800ms) to fall back to Gmail web if the app scheme fails (user stays on page).
+  2) If no Gmail app or not mobile, open Gmail web link in a new tab (window.open).
+  3) If popup blocked or something fails, finally set window.location.href = mailto.
+  Notes:
+  - Use a single “in-flight” guard to avoid double navigation.
+  - Keep timeouts conservative; don’t exceed 1s.
+  - All links should be fully URL-encoded.
+
+Create file: src/components/EmailButton.tsx
+Props:
+- inquiryId: string | number      // used to fetch recipient email from server
+- studentName: string
+- details: { current: string; requested: string; reason: string; effectiveDate: string; notes?: string }
+- prefer?: "auto" | "gmail" | "mailto" | "outlook" (default "auto")
+  * “auto” means: if mobile try gmail app → gmail web → mailto
+  * “gmail” means: gmail web only (then mailto)
+  * “mailto” means: mailto only
+  * “outlook” (optional): use Outlook web deep link (https://outlook.office.com/mail/deeplink/compose?to=…&subject=…&body=…) with mailto fallback
+
+Behavior:
+- On mount (or on first click), fetch GET /v1/inquiries/:inquiryId/center-email and store recipient email in state.
+- Build subject: `Schedule Change – ${studentName}`
+- Build body with labeled lines (CRLF between lines):
+  Student, Current, Requested, Reason, Effective Date, Notes (if present), and a final “— Sent from Parent Portal”.
+- On click:
+  - If prefer === "auto": call openWithPreference({ gmailApp, gmailWeb, mailto })
+  - If prefer === "gmail": open gmail web, fallback to mailto
+  - If prefer === "mailto": open mailto
+  - If prefer === "outlook": open Outlook web, fallback to mailto
+- Render a primary button labeled **“Email Home Center”**. Disable if the center email hasn’t been loaded yet; show a small spinner or “Loading email…” state.
+
+Validation & limits:
+- If the “to” email is missing or invalid, show a toast/error and do nothing.
+- Keep mailto/Gmail URIs under ~2000 chars; if the body is too long, truncate to a safe length and append “(truncated)”.
+
+Replace existing “submit schedule change request”:
+- Export a function replaceSubmitWithEmail(inquiryId, studentName, details) that mounts/uses EmailButton in place of the old submit control, or update the submit handler to call the email compose logic instead of calling the API.
+
+Small tests:
+- Unit test for buildGmailWebCompose/buildMailto encoding.
+- Unit test for mobile detection utility (basic UA cases).
+
+Success criteria:
+- On mobile: clicking the button attempts to open the Gmail app compose. If not installed, it falls through to Gmail web compose, then to mailto.
+- On desktop: clicking the button opens Gmail web compose; if blocked/unavailable, falls back to mailto.
+- The “to” address is dynamically fetched from /v1/inquiries/:id/center-email using the provided SQL (use parameter binding).
+- The button shows “Email Home Center” and composes with the subject/body built from details.
+
+Please implement now in small commits:
+1) server route + stub DB/repo + tests
+2) client helpers (email.ts) + tests
+3) EmailButton.tsx + wiring + replacement of submit flow
+4) polish (timeouts, truncation, error states)
