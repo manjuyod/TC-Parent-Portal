@@ -74,59 +74,14 @@ export async function getFranchiseEmail(inquiryId: number): Promise<string | nul
 
 export async function getHoursBalance(inquiryId: number) {
   try {
-    console.log("=== getHoursBalance called ===");
-    console.log("InquiryId:", inquiryId);
-    
     const request = pool.request();
     request.input("inqID", sql.Int, inquiryId);
 
-    // Call the stored procedure - Note: this might need adjustment based on actual procedure signature
+    // Call the stored procedure
     try {
-      console.log("Executing stored procedure: dpinkney_TC.dbo.USP_Report_AccountBalance");
       const result = await request.execute(
         "dpinkney_TC.dbo.USP_Report_AccountBalance",
       );
-      
-      console.log("Stored procedure result recordsets length:", result.recordsets?.length);
-      if (result.recordsets) {
-        result.recordsets.forEach((recordset, index) => {
-          console.log(`Recordset ${index} length:`, recordset.length);
-          if (recordset.length > 0) {
-            console.log(`Recordset ${index} first row:`, recordset[0]);
-          }
-        });
-      }
-      
-      // Check if the stored procedure has output parameters that might contain the actual data
-      if (result.output) {
-        console.log("Stored procedure output parameters:", result.output);
-      }
-      
-      // Try a simple direct query to check if there's any account data for this inquiryId
-      const testRequest = pool.request();
-      testRequest.input("inqID", sql.Int, inquiryId);
-      
-      try {
-        // Let's try to query some basic account tables
-        const testResult = await testRequest.query(`
-          SELECT TOP 5 * FROM dpinkney_TC.dbo.Parents WHERE ParentId = @inqID
-        `);
-        console.log("Direct Parents query result:", testResult.recordset);
-      } catch (directError) {
-        console.log("Direct query failed, trying different table names...");
-        
-        // Try other possible table names
-        const testRequest2 = pool.request();
-        testRequest2.input("inqID", sql.Int, inquiryId);
-        try {
-          const testResult2 = await testRequest2.query(`
-            SELECT TOP 5 * FROM dpinkney_TC.dbo.Parent WHERE Id = @inqID OR ParentID = @inqID OR InquiryId = @inqID
-          `);
-          console.log("Direct Parent query result:", testResult2.recordset);
-        } catch (directError2) {
-          console.log("Both direct queries failed:", directError2.message);
-        }
-      }
 
       let balanceData: any = {};
       let extraData: any[] = [];

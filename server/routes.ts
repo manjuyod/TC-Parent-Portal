@@ -264,19 +264,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/billing", requireAuth, async (req, res) => {
     try {
       const inquiryId = req.session.inquiryId!;
-      console.log("=== /api/billing endpoint called ===");
-      console.log("Session inquiryId:", inquiryId);
       
       // Get billing information
       const billingInfo = await getHoursBalance(inquiryId);
-      console.log("Billing info returned from getHoursBalance:", JSON.stringify(billingInfo, null, 2));
       
-      const response = {
+      res.json({
         billing: billingInfo || null
-      };
-      console.log("Final response being sent:", JSON.stringify(response, null, 2));
-      
-      res.json(response);
+      });
     } catch (error) {
       console.error('Billing error:', error);
       res.status(500).json({ message: "Internal server error" });

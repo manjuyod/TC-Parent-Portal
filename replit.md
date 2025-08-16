@@ -33,6 +33,15 @@ The stored procedure `USP_Report_AccountBalance` returns 5 result sets:
 
 Data Source: `result.recordsets[3]` contains the 234+ account transaction records.
 
+### Data Loading Strategy
+**Current Approach**: Sequential loading without caching
+- **Step 1**: User authentication (`/api/auth/me`)
+- **Step 2**: Student data (`/api/students`)  
+- **Step 3**: Session data for selected student only (`/api/sessions/recent`, `/api/sessions/upcoming`)
+- **Step 4**: Billing data (`/api/billing`)
+
+**Key Changes**: Removed React Query caching, prefetching, and lazy loading. Each step waits for the previous to complete. Sessions load only when student is selected (no prefetching).
+
 ### Frontend Mapping (dashboard.tsx)
 **Account Balance Report Table:**
 ```typescript

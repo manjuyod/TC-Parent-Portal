@@ -23,104 +23,55 @@ export default function Dashboard() {
   const [submitMessage, setSubmitMessage] = useState("");
   const [franchiseEmail, setFranchiseEmail] = useState("");
 
-  const { data: user } = useQuery({
+  // Sequential loading: 1. User → 2. Students → 3. Sessions → 4. Billing
+  const { data: user, isLoading: userLoading } = useQuery({
     queryKey: ["/api/auth/me"],
   });
 
-  // 1. Load students first (immediate after login - lightweight query)
-  const { data: studentsData } = useQuery({
+  // 2. Load students after user is authenticated
+  const { data: studentsData, isLoading: studentsLoading } = useQuery({
     queryKey: ["/api/students"],
     enabled: !!user,
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
   });
 
-  // Get list of students for prefetching
   const students = (studentsData as any)?.students || [];
 
-  // 2. Prefetch sessions for all students (up to 4 students max to avoid performance issues)
-  const student1 = students[0];
-  const student2 = students[1];
-  const student3 = students[2];
-  const student4 = students[3];
-
-  // Prefetch data for student 1
-  useQuery({
-    queryKey: ["/api/sessions/recent", student1?.name],
-    queryFn: async () => {
-      const response = await fetch(`/api/sessions/recent?studentId=${encodeURIComponent(student1.name)}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    },
-    enabled: !!user && !!student1,
-    staleTime: 3 * 60 * 1000, // Cache for 3 minutes
-    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
-  });
-
-  useQuery({
-    queryKey: ["/api/sessions/upcoming", student1?.name],
-    queryFn: async () => {
-      const response = await fetch(`/api/sessions/upcoming?studentId=${encodeURIComponent(student1.name)}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    },
-    enabled: !!user && !!student1,
-    staleTime: 3 * 60 * 1000, // Cache for 3 minutes
-    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
-  });
-
-  // Prefetch data for student 2
-  useQuery({
-    queryKey: ["/api/sessions/recent", student2?.name],
-    queryFn: async () => {
-      const response = await fetch(`/api/sessions/recent?studentId=${encodeURIComponent(student2.name)}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    },
-    enabled: !!user && !!student2,
-    staleTime: 3 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-  });
-
-  useQuery({
-    queryKey: ["/api/sessions/upcoming", student2?.name],
-    queryFn: async () => {
-      const response = await fetch(`/api/sessions/upcoming?studentId=${encodeURIComponent(student2.name)}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    },
-    enabled: !!user && !!student2,
-    staleTime: 3 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-  });
-
-  // Get cached data for currently selected student
+  // 3. Load sessions for selected student only (no prefetching)
   const { data: recentSessionsData, isLoading: isLoadingRecent, error: recentError } = useQuery({
     queryKey: ["/api/sessions/recent", selectedStudent],
-    enabled: false, // Don't refetch, just use cache
+    queryFn: async () => {
+      if (!selectedStudent) return { sessions: [] };
+      const response = await fetch(`/api/sessions/recent?studentId=${encodeURIComponent(selectedStudent)}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user && !!selectedStudent,
   });
 
   const { data: upcomingSessionsData, isLoading: isLoadingUpcoming, error: upcomingError } = useQuery({
     queryKey: ["/api/sessions/upcoming", selectedStudent],
-    enabled: false, // Don't refetch, just use cache
+    queryFn: async () => {
+      if (!selectedStudent) return { sessions: [] };
+      const response = await fetch(`/api/sessions/upcoming?studentId=${encodeURIComponent(selectedStudent)}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user && !!selectedStudent,
   });
 
-  // 3. Load billing immediately after students (show account balance right away)
-  const { data: billingData } = useQuery({
+  // 4. Load billing after students are loaded
+  const { data: billingData, isLoading: billingLoading } = useQuery({
     queryKey: ["/api/billing"],
-    enabled: !!user,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    enabled: !!user && !!studentsData,
   });
 
-  // Extract typed data with fallbacks
+  // Extract data
   const recentSessions = (recentSessionsData as any)?.sessions || [];
   const upcomingSessions = (upcomingSessionsData as any)?.sessions || [];
   const billing = (billingData as any)?.billing || null;
 
-  // Data loading sequence: 1) Students 2) Sessions 3) Billing (tab-specific)
-
-  if (!user) {
+  // Show loading states based on sequential loading
+  if (userLoading || !user) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
         <div className="text-center">
@@ -133,8 +84,7 @@ export default function Dashboard() {
     );
   }
 
-  // Show students loading state if students haven't loaded yet
-  if (!studentsData) {
+  if (studentsLoading || !studentsData) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
         <div className="text-center">
@@ -142,6 +92,19 @@ export default function Dashboard() {
             <span className="visually-hidden">Loading...</span>
           </div>
           <p className="text-muted">Loading student information...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (billingLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
+        <div className="text-center">
+          <div className="spinner-border text-primary mb-4" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </div>
+          <p className="text-muted">Loading billing information...</p>
         </div>
       </div>
     );
