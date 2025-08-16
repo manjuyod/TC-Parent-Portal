@@ -13,6 +13,11 @@ Preferred communication style: Simple, everyday language.
 - Connected to existing SQL Server database using legacy table structure (tblInquiry, tblstudents, tblSessionSchedule)
 - Implemented SQL Server storage functions with error handling for stored procedures
 - Added Tutoring Club branding with official logo and color scheme
+- Implemented client-side email system with Gmail web interface priority for schedule change requests
+- Removed server-side email submission, replaced with EmailButton component that opens user's email client
+- Added franchise email lookup using SQL query: SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)
+- Email button automatically fetches franchise email when student is selected
+- Prioritized Gmail web interface on desktop, Gmail app on mobile, with mailto fallback
 
 # System Architecture
 

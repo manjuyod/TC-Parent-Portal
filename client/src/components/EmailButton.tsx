@@ -17,7 +17,7 @@ export default function EmailButton({
   to, 
   studentName, 
   details, 
-  prefer = "mailto" 
+  prefer = "gmail" 
 }: EmailButtonProps) {
   const handleEmailClick = () => {
     const subject = `Schedule Change – ${studentName}`;
@@ -36,21 +36,23 @@ export default function EmailButton({
     
     const body = bodyLines.join('\r\n');
     
-    let emailLink: string;
+    // Desktop priority: Gmail web -> Gmail app -> Default email client
+    const isDesktop = !(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
     
-    switch (prefer) {
-      case "gmail":
-        emailLink = buildGmailCompose({ to, subject, body });
-        window.open(emailLink, '_blank');
-        break;
-      case "outlook":
-        emailLink = buildOutlookCompose({ to, subject, body });
-        window.open(emailLink, '_blank');
-        break;
-      default:
-        emailLink = buildMailto({ to, subject, body });
-        window.location.href = emailLink;
-        break;
+    if (isDesktop) {
+      // Try Gmail web first (most reliable on desktop)
+      const gmailLink = buildGmailCompose({ to, subject, body });
+      window.open(gmailLink, '_blank');
+    } else {
+      // On mobile, try Gmail app first, then fallback to mailto
+      try {
+        const gmailLink = buildGmailCompose({ to, subject, body });
+        window.open(gmailLink, '_blank');
+      } catch (error) {
+        // Fallback to default email client on mobile
+        const mailtoLink = buildMailto({ to, subject, body });
+        window.location.href = mailtoLink;
+      }
     }
   };
 
