@@ -386,7 +386,7 @@ export default function Dashboard() {
               <div className="card-body">
                 {sessions && sessions.length > 0 ? (
                   <div className="timeline-container" style={{ maxHeight: "300px", overflowY: "auto" }}>
-                    {sessions.slice(0, 5).map((session: any, index: number) => (
+                    {sessions.filter((session: any) => session && session.category === 'recent').slice(0, 5).map((session: any, index: number) => (
                       <div key={index} className="timeline-item mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
                         <div className="d-flex">
                           <div className="timeline-marker me-3 mt-1">
@@ -394,8 +394,8 @@ export default function Dashboard() {
                           </div>
                           <div className="flex-grow-1">
                             <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                            <p className="mb-1 small">{session.FormattedDate || 'N/A'}</p>
-                            <p className="mb-0 text-muted small">{session.Day || 'N/A'} • {session.Time || 'N/A'}</p>
+                            <p className="mb-1 small">{session?.FormattedDate || 'N/A'}</p>
+                            <p className="mb-0 text-muted small">{session?.Day || 'N/A'} • {session?.Time || 'N/A'}</p>
                           </div>
                         </div>
                       </div>
@@ -403,7 +403,7 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <div className="alert alert-info small">
-                    No upcoming sessions scheduled.
+                    No recent sessions found.
                   </div>
                 )}
               </div>
@@ -424,13 +424,13 @@ export default function Dashboard() {
                         <div className="d-flex justify-content-between align-items-start">
                           <div>
                             <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                            <p className="mb-0 small text-muted">{session.FormattedDate || 'N/A'}</p>
+                            <p className="mb-0 small text-muted">{session?.FormattedDate || 'N/A'}</p>
                           </div>
                           <div className="text-end">
                             <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
-                              {session.Day || 'N/A'}
+                              {session?.Day || 'N/A'}
                             </span>
-                            <p className="mb-0 small text-muted">{session.Time || 'N/A'}</p>
+                            <p className="mb-0 small text-muted">{session?.Time || 'N/A'}</p>
                           </div>
                         </div>
                       </div>
