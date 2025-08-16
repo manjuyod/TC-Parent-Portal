@@ -36,23 +36,49 @@ export default function EmailButton({
     
     const body = bodyLines.join('\r\n');
     
-    // Desktop priority: Gmail web -> Gmail app -> Default email client
-    const isDesktop = !(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
-    if (isDesktop) {
-      // Try Gmail web first (most reliable on desktop)
-      const gmailLink = buildGmailCompose({ to, subject, body });
-      window.open(gmailLink, '_blank');
+    // Priority: Gmail app -> Gmail web -> Default email client
+    if (isMobile) {
+      // On mobile, try Gmail app first with proper URL scheme
+      const gmailAppLink = `googlegmail://co?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      
+      // Use a more reliable method to detect if app opens
+      let appOpened = false;
+      const startTime = Date.now();
+      
+      const tryGmailApp = () => {
+        window.location.href = gmailAppLink;
+        
+        // Check if user is still on page after short delay (indicates app didn't open)
+        setTimeout(() => {
+          if (!appOpened && (Date.now() - startTime) < 2000) {
+            // Gmail app didn't open, try Gmail web
+            const gmailWebLink = buildGmailCompose({ to, subject, body });
+            window.open(gmailWebLink, '_blank');
+          }
+        }, 500);
+      };
+      
+      // Detect when user leaves/returns to detect app opening
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          appOpened = true;
+        }
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      tryGmailApp();
+      
+      // Clean up event listener
+      setTimeout(() => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }, 3000);
+      
     } else {
-      // On mobile, try Gmail app first, then fallback to mailto
-      try {
-        const gmailLink = buildGmailCompose({ to, subject, body });
-        window.open(gmailLink, '_blank');
-      } catch (error) {
-        // Fallback to default email client on mobile
-        const mailtoLink = buildMailto({ to, subject, body });
-        window.location.href = mailtoLink;
-      }
+      // On desktop, prefer Gmail web interface
+      const gmailWebLink = buildGmailCompose({ to, subject, body });
+      window.open(gmailWebLink, '_blank');
     }
   };
 
