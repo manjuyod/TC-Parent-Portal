@@ -27,15 +27,28 @@ export default function Dashboard() {
     queryKey: ["/api/auth/me"],
   });
 
-  const { data: dashboardData } = useQuery({
-    queryKey: ["/api/dashboard"],
+  // Load students immediately (lightweight)
+  const { data: studentsData } = useQuery({
+    queryKey: ["/api/students"],
     enabled: !!user,
   });
 
+  // Load sessions only when needed (on schedule tab or student selection)
+  const { data: sessionsData } = useQuery({
+    queryKey: ["/api/sessions", selectedStudent],
+    enabled: !!user && (activeTab === "home" && selectedStudent || activeTab === "schedule"),
+  });
+
+  // Load billing only when billing tab is active (heaviest query)
+  const { data: billingData } = useQuery({
+    queryKey: ["/api/billing"],
+    enabled: !!user && activeTab === "billing",
+  });
+
   // Extract typed data with fallbacks
-  const students = (dashboardData as any)?.students || [];
-  const sessions = (dashboardData as any)?.sessions || [];
-  const billing = (dashboardData as any)?.billing || null;
+  const students = (studentsData as any)?.students || [];
+  const sessions = (sessionsData as any)?.sessions || [];
+  const billing = (billingData as any)?.billing || null;
 
   if (!user) {
     return (

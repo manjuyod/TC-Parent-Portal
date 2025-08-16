@@ -18,6 +18,8 @@ Preferred communication style: Simple, everyday language.
 - Added franchise email lookup using SQL query: SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)
 - Email button automatically fetches franchise email when student is selected
 - Prioritized Gmail app on mobile with iframe detection, Gmail web interface on desktop, optimized for preview environments
+- Optimized login performance by splitting dashboard data into separate lazy-loaded endpoints (students, sessions, billing)
+- Reduced initial login time by loading only essential student data first (9ms vs 20+ seconds)
 
 # System Architecture
 

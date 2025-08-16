@@ -116,69 +116,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get dashboard data
-  app.get("/api/dashboard", requireAuth, async (req, res) => {
+  // Get students only (fast initial load)
+  app.get("/api/students", requireAuth, async (req, res) => {
     try {
-      const inquiryId = req.session.inquiryId!;
-      const studentIds = req.session.studentIds || [];
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
       
-      // Get parent and student info
+      // Get parent and student info only
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
         return res.status(404).json({ message: "Parent data not found" });
       }
 
       const studentsInfo = inquiryData.students;
+
+      res.json({
+        students: studentsInfo.map((student: any) => ({
+          id: student.ID,
+          name: `${student.FirstName} ${student.LastName}`,
+          grade: 'N/A',
+          subject: 'N/A',
+          status: 'active',
+          progress: 0
+        }))
+      });
+    } catch (error) {
+      console.error('Students error:', error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get sessions (load on demand)
+  app.get("/api/sessions", requireAuth, async (req, res) => {
+    try {
+      const contactPhone = req.session.contactPhone!;
+      const email = req.session.email!;
+      const { studentId } = req.query;
       
-      // Get all sessions for all students
-      const allSessions: any[] = [];
-      for (const student of studentsInfo) {
-        const studentSessions = await getSessions(student.ID);
-        studentSessions.forEach((session: any) => {
-          session.studentName = `${student.FirstName} ${student.LastName}`;
-          session.studentId = student.ID;
-        });
-        allSessions.push(...studentSessions);
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
+      if (!inquiryData) {
+        return res.status(404).json({ message: "Parent data not found" });
       }
 
+      const studentsInfo = inquiryData.students;
+      const allSessions: any[] = [];
+
+      // If specific student requested, get only their sessions
+      if (studentId) {
+        const student = studentsInfo.find((s: any) => s.ID.toString() === studentId);
+        if (student) {
+          const studentSessions = await getSessions(student.ID);
+          studentSessions.forEach((session: any) => {
+            session.studentName = `${student.FirstName} ${student.LastName}`;
+            session.studentId = student.ID;
+          });
+          allSessions.push(...studentSessions);
+        }
+      } else {
+        // Get sessions for all students
+        for (const student of studentsInfo) {
+          const studentSessions = await getSessions(student.ID);
+          studentSessions.forEach((session: any) => {
+            session.studentName = `${student.FirstName} ${student.LastName}`;
+            session.studentId = student.ID;
+          });
+          allSessions.push(...studentSessions);
+        }
+      }
+
+      res.json({
+        sessions: allSessions
+      });
+    } catch (error) {
+      console.error('Sessions error:', error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get billing (heavy query, load only when needed)
+  app.get("/api/billing", requireAuth, async (req, res) => {
+    try {
+      const inquiryId = req.session.inquiryId!;
+      
       // Get billing information
       const billingInfo = await getHoursBalance(inquiryId);
       
-      // Calculate sessions this month
-      const sessionsThisMonth = allSessions.length;
-
       res.json({
-        students: studentsInfo.map((student: any) => {
-          const studentSessions = allSessions.filter(s => s.studentId === student.ID);
-          const nextSession = studentSessions.length > 0 ? 
-            `${studentSessions[0].Day} ${studentSessions[0].Time}` : 
-            "No sessions scheduled";
-          
-          return {
-            id: student.ID,
-            name: `${student.FirstName} ${student.LastName}`,
-            grade: 'N/A',
-            subject: 'N/A',
-            status: 'active',
-            progress: 0,
-            nextSession,
-          };
-        }),
-        sessions: allSessions,
         billing: billingInfo ? {
-          currentBalance: '0.00',
-          monthlyRate: '320.00',
-          nextPaymentDate: 'N/A',
-          paymentMethod: 'N/A',
-          sessionsThisMonth,
-          ...billingInfo
-        } : null,
-        transactions: [], // No transaction data in legacy structure
+          total_hours: billingInfo.total_hours || 0,
+          used_hours: billingInfo.used_hours || 0,
+          remaining_hours: billingInfo.remaining_hours || 0,
+          next_payment_date: billingInfo.next_payment_date || null,
+          account_details: billingInfo.account_details || []
+        } : null
       });
     } catch (error) {
-      console.error('Dashboard error:', error);
+      console.error('Billing error:', error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
