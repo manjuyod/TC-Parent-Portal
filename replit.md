@@ -13,21 +13,25 @@ Data loading priority: Students first (immediate), sessions second (on-demand), 
 - **Account Balance Definition**: In this system, "account balance" refers to remaining tutoring hours, NOT monetary amounts. The billing system tracks hours purchased/used, not dollar balances.
 
 ## Billing System Data Structure
-The billing tab displays data from the stored procedure `USP_Report_AccountBalance` which returns 4 result sets:
+The stored procedure `USP_Report_AccountBalance` returns 5 result sets:
+- **Result Set 0**: Starting balance info (1 row)
+- **Result Set 1**: Balance calculations (1 row) - `Purchases`, `AttendancePresent`, `UnexcusedAbsences`, `MiscAdjustments`
+- **Result Set 2**: Account holder info (1 row) - `AccountHolder`, `AccountNumber`, `Students`
+- **Result Set 3**: Transaction history (234+ rows) - Account details with `FormattedDate`, `Student`, `EventType`, `Adjustment`
+- **Result Set 4**: Report metadata (1 row)
 
 ### Account Balance Report Table
 - **Account Holder**: `result.recordsets[2][0].AccountHolder` - Parent/guardian name
-- **Students**: `result.recordsets[2][0].StudentNames` - Comma-separated student names  
-- **Hours Remaining**: Calculated from `result.recordsets[1][0]` fields:
-  - `Purchases` + `AttendancePresent` + `UnexcusedAbsences` + `MiscAdjustments`
+- **Students**: `result.recordsets[2][0].Students` - Student names from database
+- **Hours Remaining**: Calculated from `result.recordsets[1][0]` balance fields
 
 ### Account Details Table  
 - **Date**: `FormattedDate` - Transaction date (MM/DD/YYYY format)
 - **Student**: `Student` - Which student the transaction applies to
 - **Event Type**: `EventType` - Type of transaction (Session Attendance, Initial Purchase, etc.)
-- **Adjustment**: `Adjustment` - Hour change (+/- decimal values, positive = hours added, negative = hours used)
+- **Adjustment**: `Adjustment` - Hour change (+/- decimal values)
 
-Data Source: `result.recordsets[3]` contains the account transaction history.
+Data Source: `result.recordsets[3]` contains the 234+ account transaction records.
 
 ### Frontend Mapping (dashboard.tsx)
 **Account Balance Report Table:**

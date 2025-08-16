@@ -89,13 +89,7 @@ export async function getHoursBalance(inquiryId: number) {
       let remainingHours = 0.0;
 
       if (result.recordsets && Array.isArray(result.recordsets) && result.recordsets.length > 0) {
-        console.log("Processing stored procedure result sets:");
-        result.recordsets.forEach((recordset: any, index: number) => {
-          console.log(`Result set ${index}: ${recordset.length} rows`);
-          if (recordset.length > 0) {
-            console.log(`First row keys:`, Object.keys(recordset[0]));
-          }
-        });
+        // Remove verbose logging now that we understand the structure
 
         // Second result set (balance-related info)
         if (result.recordsets.length > 1) {
@@ -103,12 +97,16 @@ export async function getHoursBalance(inquiryId: number) {
           balanceData = balanceRow || {};
         }
 
-        // Third result set (Account Holder and Students info)
-        if (result.recordsets.length > 2) {
-          extraData = result.recordsets[2] || [];
+        // Third result set (Account Holder and Students info) - this is result set 2 (0-indexed)
+        if (result.recordsets.length > 2 && result.recordsets[2].length > 0) {
+          const accountInfo = result.recordsets[2][0];
+          extraData = [{
+            AccountHolder: accountInfo.AccountHolder,
+            StudentNames: accountInfo.Students
+          }];
         }
 
-        // Fourth result set (Account Details)
+        // Fourth result set (Account Details) - this is result set 3 (0-indexed)
         if (result.recordsets.length > 3) {
           accountDetails = result.recordsets[3] || [];
         }

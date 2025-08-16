@@ -107,10 +107,10 @@ export default function Dashboard() {
 
   // 3. Load billing immediately after students (show account balance right away)
   const { data: billingData } = useQuery({
-    queryKey: ["/api/billing", Date.now()], // Force fresh request every time
+    queryKey: ["/api/billing"],
     enabled: !!user,
-    staleTime: 0, // Always fresh
-    gcTime: 0, // No caching
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
   });
 
   // Extract typed data with fallbacks
