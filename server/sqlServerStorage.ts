@@ -136,16 +136,17 @@ export async function getHoursBalance(inquiryId: number) {
         extra: [
           {
             AccountHolder: "Angie Golden",
-            StudentNames: "Sophia Golden, Marcus Golden"
+            StudentNames: "Sophia Golden, Benjamin Golden"
           }
         ],
         account_details: [
-          { Description: "Initial Purchase", Amount: 10.0, Date: "2025-07-01", Type: "Credit" },
-          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-15", Type: "Debit" },
-          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-22", Type: "Debit" },
-          { Description: "Balance Adjustment", Amount: 2.0, Date: "2025-08-01", Type: "Credit" },
-          { Description: "Session Attendance", Amount: -1.5, Date: "2025-08-05", Type: "Debit" },
-          { Description: "Package Purchase", Amount: 15.0, Date: "2025-08-10", Type: "Credit" }
+          { FormattedDate: "07/01/2025", Student: "Sophia Golden", EventType: "Initial Purchase", Adjustment: 10.0 },
+          { FormattedDate: "07/15/2025", Student: "Sophia Golden", EventType: "Session Attendance", Adjustment: -1.0 },
+          { FormattedDate: "07/22/2025", Student: "Benjamin Golden", EventType: "Session Attendance", Adjustment: -1.0 },
+          { FormattedDate: "07/24/2025", Student: "Benjamin Golden", EventType: "Enroll Student", Adjustment: 0.0 },
+          { FormattedDate: "08/01/2025", Student: "Sophia Golden", EventType: "Balance Adjustment", Adjustment: 2.0 },
+          { FormattedDate: "08/05/2025", Student: "Benjamin Golden", EventType: "Session Attendance", Adjustment: -1.5 },
+          { FormattedDate: "08/10/2025", Student: "Sophia Golden", EventType: "Package Purchase", Adjustment: 15.0 }
         ],
         remaining_hours: 5.0,
       };
