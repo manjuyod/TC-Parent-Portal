@@ -149,9 +149,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get recent sessions (from tblSessionSchedule - past dates)
   app.get("/api/sessions/recent", requireAuth, async (req, res) => {
     try {
+      console.log('[RECENT SESSIONS] API endpoint hit');
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
       const { studentId } = req.query;
+      console.log('[RECENT SESSIONS] studentId from query:', studentId);
       
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
@@ -203,6 +205,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      console.log('[RECENT SESSIONS] Returning response with sessions:', recentSessions.length);
       res.json({
         sessions: recentSessions
       });
@@ -215,9 +218,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get upcoming sessions (from tblSessionSchedule - future dates)
   app.get("/api/sessions/upcoming", requireAuth, async (req, res) => {
     try {
+      console.log('[UPCOMING SESSIONS] API endpoint hit');
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
       const { studentId } = req.query;
+      console.log('[UPCOMING SESSIONS] studentId from query:', studentId);
       
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
@@ -269,6 +274,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      console.log('[UPCOMING SESSIONS] Returning response with sessions:', upcomingSessions.length);
       res.json({
         sessions: upcomingSessions
       });
