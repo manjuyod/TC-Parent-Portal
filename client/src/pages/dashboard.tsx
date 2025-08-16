@@ -785,10 +785,6 @@ export default function Dashboard() {
                     style={{ maxHeight: "300px", overflowY: "auto" }}
                   >
                     {filteredSessions
-                      .filter(
-                        (session: any) =>
-                          session && session.category === "recent",
-                      )
                       .slice(0, 5)
                       .map((session: any, index: number) => (
                         <div
@@ -857,10 +853,6 @@ export default function Dashboard() {
                   filteredSessions &&
                   filteredSessions.length > 0 ? (
                     filteredSessions
-                      .filter(
-                        (session: any) =>
-                          session && session.category === "upcoming",
-                      )
                       .slice(0, 4)
                       .map((session: any, index: number) => (
                         <div
