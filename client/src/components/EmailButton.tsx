@@ -17,7 +17,7 @@ export default function EmailButton({
   to, 
   studentName, 
   details, 
-  prefer = "gmail" 
+  prefer = "mailto" 
 }: EmailButtonProps) {
   const handleEmailClick = () => {
     const subject = `Schedule Change – ${studentName}`;
@@ -36,31 +36,21 @@ export default function EmailButton({
     
     const body = bodyLines.join('\r\n');
     
-    // Simplified approach that works better in preview environments
-    // Try Gmail app first, then fallback to Gmail web
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    let emailLink: string;
     
-    if (isMobile) {
-      // On mobile: Try Gmail app, then Gmail web, then default
-      const gmailAppLink = `googlegmail://co?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      
-      // Create a hidden iframe to test app availability
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.src = gmailAppLink;
-      document.body.appendChild(iframe);
-      
-      // Clean up iframe and fallback to Gmail web after short delay
-      setTimeout(() => {
-        document.body.removeChild(iframe);
-        const gmailWebLink = buildGmailCompose({ to, subject, body });
-        window.open(gmailWebLink, '_blank');
-      }, 1000);
-      
-    } else {
-      // On desktop: Gmail web interface works best
-      const gmailWebLink = buildGmailCompose({ to, subject, body });
-      window.open(gmailWebLink, '_blank');
+    switch (prefer) {
+      case "gmail":
+        emailLink = buildGmailCompose({ to, subject, body });
+        window.open(emailLink, '_blank');
+        break;
+      case "outlook":
+        emailLink = buildOutlookCompose({ to, subject, body });
+        window.open(emailLink, '_blank');
+        break;
+      default:
+        emailLink = buildMailto({ to, subject, body });
+        window.location.href = emailLink;
+        break;
     }
   };
 

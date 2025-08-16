@@ -353,7 +353,7 @@ export default function Dashboard() {
                       effectiveDate: scheduleForm.preferredDate,
                       notes: scheduleForm.additionalNotes
                     }}
-                    prefer="gmail"
+                    prefer="mailto"
                   />
                 )}
               </div>
