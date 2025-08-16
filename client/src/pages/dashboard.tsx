@@ -81,33 +81,25 @@ export default function Dashboard() {
 
   const totalPages = billing?.account_details ? Math.ceil(billing.account_details.length / itemsPerPage) : 1;
 
-  const handleScheduleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setSubmitMessage("");
-
+  // Fetch franchise email when student is selected
+  const fetchFranchiseEmail = async (studentId: string) => {
+    if (!studentId) return;
+    
     try {
-      const response = await fetch("/api/schedule-change-request", {
+      const response = await fetch("/api/get-franchise-email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(scheduleForm),
+        body: JSON.stringify({ studentId: studentId }),
       });
 
       const result = await response.json();
-
       if (response.ok) {
-        setSubmitMessage("Schedule change request submitted successfully! Use the 'Email Home Center' button to send the request.");
         setFranchiseEmail(result.franchiseEmail || "");
-      } else {
-        setSubmitMessage(`Error: ${result.message}`);
       }
     } catch (error) {
-      setSubmitMessage("Error submitting request. Please try again.");
-      console.error("Submit error:", error);
-    } finally {
-      setIsSubmitting(false);
+      console.error("Error fetching franchise email:", error);
     }
   };
 
@@ -241,7 +233,7 @@ export default function Dashboard() {
                 </div>
               )}
               
-              <form onSubmit={handleScheduleFormSubmit}>
+              <div className="schedule-form">{/* Schedule Change Form */}
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label htmlFor="student_name" className="form-label">
@@ -251,7 +243,12 @@ export default function Dashboard() {
                       className="form-control" 
                       id="student_name" 
                       value={scheduleForm.studentId}
-                      onChange={(e) => setScheduleForm({...scheduleForm, studentId: e.target.value})}
+                      onChange={(e) => {
+                        setScheduleForm({...scheduleForm, studentId: e.target.value});
+                        if (e.target.value) {
+                          fetchFranchiseEmail(e.target.value);
+                        }
+                      }}
                       required
                     >
                       <option value="">Select a student</option>
@@ -345,31 +342,21 @@ export default function Dashboard() {
                     onChange={(e) => setScheduleForm({...scheduleForm, additionalNotes: e.target.value})}
                   ></textarea>
                 </div>
-                <div className="d-flex gap-2">
-                  <button 
-                    type="submit" 
-                    className="btn btn-success"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? 'Submitting...' : 'Submit Schedule Change Request'}
-                  </button>
-                  
-                  {scheduleForm.studentId && scheduleForm.currentSession && scheduleForm.requestedChange && (
-                    <EmailButton
-                      to={franchiseEmail || "franchise@example.com"}
-                      studentName={students.find((s: any) => s.id.toString() === scheduleForm.studentId)?.name || 'Unknown Student'}
-                      details={{
-                        current: scheduleForm.currentSession,
-                        requested: scheduleForm.requestedChange,
-                        reason: scheduleForm.reason,
-                        effectiveDate: scheduleForm.preferredDate,
-                        notes: scheduleForm.additionalNotes
-                      }}
-                      prefer="mailto"
-                    />
-                  )}
-                </div>
-              </form>
+                {scheduleForm.studentId && scheduleForm.currentSession && scheduleForm.requestedChange && (
+                  <EmailButton
+                    to={franchiseEmail || "franchise@example.com"}
+                    studentName={students.find((s: any) => s.id.toString() === scheduleForm.studentId)?.name || 'Unknown Student'}
+                    details={{
+                      current: scheduleForm.currentSession,
+                      requested: scheduleForm.requestedChange,
+                      reason: scheduleForm.reason,
+                      effectiveDate: scheduleForm.preferredDate,
+                      notes: scheduleForm.additionalNotes
+                    }}
+                    prefer="mailto"
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>

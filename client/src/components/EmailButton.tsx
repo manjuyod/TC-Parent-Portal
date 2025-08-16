@@ -57,10 +57,10 @@ export default function EmailButton({
   return (
     <button 
       type="button"
-      className="btn btn-primary"
+      className="btn btn-success"
       onClick={handleEmailClick}
     >
-      Email Home Center
+      Send Email
     </button>
   );
 }

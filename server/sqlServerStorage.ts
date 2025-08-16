@@ -398,3 +398,26 @@ export async function submitScheduleChangeRequest(requestData: {
     return { error: "Failed to submit request" };
   }
 }
+
+// Generic query function for direct SQL execution
+export async function query(sql: string, params: Record<string, any> = {}) {
+  try {
+    const request = pool.request();
+    
+    // Add parameters to the request
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value === 'string') {
+        request.input(key, value);
+      } else if (typeof value === 'number') {
+        request.input(key, value);
+      } else {
+        request.input(key, value);
+      }
+    }
+    
+    return await request.query(sql);
+  } catch (error) {
+    console.error('SQL query error:', error);
+    throw error;
+  }
+}

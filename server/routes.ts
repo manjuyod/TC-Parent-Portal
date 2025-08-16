@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest, getFranchiseEmail } from "./sqlServerStorage";
+import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest, getFranchiseEmail, query } from "./sqlServerStorage";
 import { emailService } from "./emailService";
 import { loginSchema } from "@shared/schema";
 import session from "express-session";
@@ -235,6 +235,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error('Schedule change request error:', error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // New endpoint to get franchise email based on student
+  app.post("/api/get-franchise-email", async (req, res) => {
+    try {
+      const { studentId } = req.body;
+      
+      if (!studentId) {
+        return res.status(400).json({ message: "Student ID is required" });
+      }
+
+      // Get the inquiry ID for this student  
+      const inquiryResult = await query(
+        "SELECT InquiryID FROM tblstudents WHERE ID = @studentId",
+        { studentId: parseInt(studentId) }
+      );
+
+      if (!inquiryResult.recordset || inquiryResult.recordset.length === 0) {
+        return res.status(404).json({ message: "Student not found" });
+      }
+
+      const inquiryID = inquiryResult.recordset[0].InquiryID;
+
+      // Get franchise email using your specific query
+      const franchiseResult = await query(
+        "SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)",
+        { InquiryID: inquiryID }
+      );
+
+      if (!franchiseResult.recordset || franchiseResult.recordset.length === 0) {
+        return res.status(404).json({ message: "Franchise email not found" });
+      }
+
+      const franchiseEmail = franchiseResult.recordset[0].FranchiesEmail;
+
+      res.json({ 
+        franchiseEmail: franchiseEmail 
+      });
+
+    } catch (error) {
+      console.error("Error fetching franchise email:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
