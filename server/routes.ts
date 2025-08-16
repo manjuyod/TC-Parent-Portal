@@ -172,7 +172,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (targetStudent) {
+        console.log(`Getting recent sessions for student: ${targetStudent.FirstName} ${targetStudent.LastName} (ID: ${targetStudent.ID})`);
         const studentSessions = await getSessions(targetStudent.ID);
+        console.log(`Found ${studentSessions.length} total sessions for student`);
+        
         studentSessions.forEach((session: any) => {
           if (session.category === "recent") {
             session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
@@ -180,6 +183,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             recentSessions.push(session);
           }
         });
+        
+        console.log(`Filtered to ${recentSessions.length} recent sessions`);
       } else if (!selectedStudentName) {
         // Get sessions for all students if no specific student
         for (const student of studentsInfo) {
@@ -229,7 +234,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (targetStudent) {
+        console.log(`Getting upcoming sessions for student: ${targetStudent.FirstName} ${targetStudent.LastName} (ID: ${targetStudent.ID})`);
         const studentSessions = await getSessions(targetStudent.ID);
+        console.log(`Found ${studentSessions.length} total sessions for student`);
+        
         studentSessions.forEach((session: any) => {
           if (session.category === "upcoming") {
             session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
@@ -237,6 +245,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             upcomingSessions.push(session);
           }
         });
+        
+        console.log(`Filtered to ${upcomingSessions.length} upcoming sessions`);
       } else if (!selectedStudentName) {
         // Get sessions for all students if no specific student
         for (const student of studentsInfo) {
