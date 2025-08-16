@@ -1,59 +1,43 @@
-import { useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
 import logoPath from "@assets/logo_1755332058201.webp";
 
 interface HeaderProps {
-  username: string;
-  students: string[];
+  user?: {
+    parent: {
+      name: string;
+    };
+  };
+  students?: Array<{ name: string }>;
+  onLogout?: () => void;
 }
 
-export default function Header({ username, students }: HeaderProps) {
-  const [, navigate] = useLocation();
-
-  const logoutMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", "/api/auth/logout", {});
-    },
-    onSuccess: () => {
-      queryClient.clear();
-      navigate("/login");
-    },
-  });
-
+export default function Header({ user, students, onLogout }: HeaderProps) {
   return (
-    <header className="bg-white shadow-sm border-b">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center py-4">
-          <div className="flex items-center space-x-4">
-            <img 
-              src={logoPath} 
-              alt="Tutoring Club Logo" 
-              className="h-12 w-auto"
-            />
-            <h1 className="text-2xl font-bold text-tutoring-blue">Tutoring Club Parent Portal</h1>
+    <div className="header-section">
+      <div className="container">
+        <div className="d-flex justify-content-between align-items-center">
+          <div className="header-brand">
+            <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
+            <h1 className="header-title">Tutoring Club Parent Portal</h1>
           </div>
-          
-          <div className="text-right">
-            <div className="font-semibold text-text-dark">Welcome, {username}!</div>
-            <div className="text-sm text-text-light">
-              Students: {students.join(', ')}
+          {user && (
+            <div className="text-end">
+              <div className="text-dark mb-1">
+                <strong>Welcome, {user.parent.name}!</strong>
+              </div>
+              {students && students.length > 0 && (
+                <div className="text-muted small mb-2">
+                  Students: {students.map(s => s.name).join(', ')}
+                </div>
+              )}
+              {onLogout && (
+                <button onClick={onLogout} className="btn btn-outline-primary btn-sm">
+                  Logout
+                </button>
+              )}
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => logoutMutation.mutate()}
-              disabled={logoutMutation.isPending}
-              className="mt-2 text-sm text-tutoring-blue hover:text-light-blue transition-colors"
-            >
-              <LogOut className="w-4 h-4 mr-1" />
-              {logoutMutation.isPending ? "Logging out..." : "Logout"}
-            </Button>
-          </div>
+          )}
         </div>
       </div>
-    </header>
+    </div>
   );
 }
