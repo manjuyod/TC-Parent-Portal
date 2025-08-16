@@ -57,15 +57,7 @@ export async function getHoursBalance(inquiryId: number) {
         "dpinkney_TC.dbo.USP_Report_AccountBalance",
       );
 
-      console.log('Stored procedure result sets count:', result.recordsets?.length);
-      if (result.recordsets) {
-        result.recordsets.forEach((recordset, index) => {
-          console.log(`Result set ${index + 1}:`, recordset.length, 'records');
-          if (recordset.length > 0) {
-            console.log(`Sample from result set ${index + 1}:`, recordset[0]);
-          }
-        });
-      }
+      // Stored procedure executed successfully
 
       let balanceData = {};
       let extraData: any[] = [];
@@ -85,7 +77,6 @@ export async function getHoursBalance(inquiryId: number) {
         // Fourth result set (Account Details)
         if (result.recordsets.length > 3) {
           accountDetails = result.recordsets[3] || [];
-          console.log('Account details from result set 4:', accountDetails);
         }
 
         // Calculate remaining hours
@@ -107,7 +98,7 @@ export async function getHoursBalance(inquiryId: number) {
         remaining_hours: remainingHours,
       };
     } catch (procError) {
-      console.log("Stored procedure not available, using mock data for now");
+      console.log("Stored procedure error:", procError.message);
       // Return mock data structure for development
       return {
         balance: {

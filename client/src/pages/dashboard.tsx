@@ -378,25 +378,23 @@ export default function Dashboard() {
                   <table className="table table-striped table-sm">
                     <thead>
                       <tr>
-                        <th>Description</th>
-                        <th>Amount</th>
                         <th>Date</th>
-                        <th>Type</th>
+                        <th>Student</th>
+                        <th>Event Type</th>
+                        <th>Attendance</th>
+                        <th>Adjustment</th>
                       </tr>
                     </thead>
                     <tbody>
                       {billing.account_details.map((detail: any, index: number) => (
                         <tr key={index}>
-                          <td>{detail.Description || "N/A"}</td>
+                          <td>{detail.FormattedDate || "N/A"}</td>
+                          <td>{detail.Student || "N/A"}</td>
+                          <td>{detail.EventType || "N/A"}</td>
+                          <td>{detail.Attendance || "N/A"}</td>
                           <td>
-                            <span className={detail.Type === "Credit" ? "text-success" : "text-danger"}>
-                              {detail.Type === "Credit" ? "+" : ""}{detail.Amount || 0}
-                            </span>
-                          </td>
-                          <td>{detail.Date || "N/A"}</td>
-                          <td>
-                            <span className={`badge ${detail.Type === "Credit" ? "bg-success" : "bg-danger"}`}>
-                              {detail.Type || "N/A"}
+                            <span className={detail.Adjustment > 0 ? "text-success" : detail.Adjustment < 0 ? "text-danger" : ""}>
+                              {detail.Adjustment > 0 ? "+" : ""}{detail.Adjustment || 0}
                             </span>
                           </td>
                         </tr>
