@@ -1,10 +1,9 @@
 import { google } from 'googleapis';
-import nodemailer from 'nodemailer';
 
 // Gmail service setup using service account credentials
 export class EmailService {
-  private transporter: any;
   private gmail: any;
+  private auth: any;
 
   constructor() {
     this.initializeGmailService();
@@ -16,24 +15,13 @@ export class EmailService {
       const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
       
       // Create OAuth2 client with service account
-      const auth = new google.auth.GoogleAuth({
+      this.auth = new google.auth.GoogleAuth({
         credentials,
         scopes: ['https://www.googleapis.com/auth/gmail.send']
       });
 
       // Initialize Gmail API
-      this.gmail = google.gmail({ version: 'v1', auth });
-
-      // Create nodemailer transporter with Gmail OAuth2
-      this.transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          type: 'OAuth2',
-          user: credentials.client_email,
-          serviceClient: credentials.client_id,
-          privateKey: credentials.private_key,
-        }
-      });
+      this.gmail = google.gmail({ version: 'v1', auth: this.auth });
 
       console.log('Gmail service initialized successfully');
     } catch (error) {
@@ -133,17 +121,43 @@ ACTION REQUIRED: Please review this schedule change request and contact the pare
 This request was submitted on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}.
       `;
 
-      const mailOptions = {
-        from: process.env.gmailJSONCreds ? JSON.parse(process.env.gmailJSONCreds).client_email : 'noreply@tutoringclub.com',
-        to: franchiseEmail,
-        subject: subject,
-        text: textContent,
-        html: htmlContent
-      };
+      // Create email in RFC 2822 format
+      const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
+      const fromEmail = credentials.client_email || 'noreply@tutoringclub.com';
+      
+      const emailLines = [
+        `From: Tutoring Club Portal <${fromEmail}>`,
+        `To: ${franchiseEmail}`,
+        `Subject: ${subject}`,
+        `MIME-Version: 1.0`,
+        `Content-Type: multipart/alternative; boundary="boundary123"`,
+        ``,
+        `--boundary123`,
+        `Content-Type: text/plain; charset=utf-8`,
+        ``,
+        textContent,
+        ``,
+        `--boundary123`,
+        `Content-Type: text/html; charset=utf-8`,
+        ``,
+        htmlContent,
+        ``,
+        `--boundary123--`
+      ];
 
-      const result = await this.transporter.sendMail(mailOptions);
-      console.log('Schedule change email sent successfully:', result.messageId);
-      return { success: true, messageId: result.messageId };
+      const emailContent = emailLines.join('\r\n');
+      const encodedEmail = Buffer.from(emailContent).toString('base64url');
+
+      // Send email using Gmail API
+      const result = await this.gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedEmail
+        }
+      });
+
+      console.log('Schedule change email sent successfully:', result.data.id);
+      return { success: true, messageId: result.data.id };
 
     } catch (error) {
       console.error('Failed to send schedule change email:', error);
