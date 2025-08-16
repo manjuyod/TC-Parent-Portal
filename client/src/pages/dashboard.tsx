@@ -31,44 +31,89 @@ export default function Dashboard() {
   const { data: studentsData } = useQuery({
     queryKey: ["/api/students"],
     enabled: !!user,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
   });
 
-  // 2a. Load recent sessions when student selected (past dates from tblSessionSchedule)
+  // Get list of students for prefetching
+  const students = (studentsData as any)?.students || [];
+
+  // 2. Prefetch sessions for all students (up to 4 students max to avoid performance issues)
+  const student1 = students[0];
+  const student2 = students[1];
+  const student3 = students[2];
+  const student4 = students[3];
+
+  // Prefetch data for student 1
+  useQuery({
+    queryKey: ["/api/sessions/recent", student1?.name],
+    queryFn: async () => {
+      const response = await fetch(`/api/sessions/recent?studentId=${encodeURIComponent(student1.name)}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user && !!student1,
+    staleTime: 3 * 60 * 1000, // Cache for 3 minutes
+    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
+  });
+
+  useQuery({
+    queryKey: ["/api/sessions/upcoming", student1?.name],
+    queryFn: async () => {
+      const response = await fetch(`/api/sessions/upcoming?studentId=${encodeURIComponent(student1.name)}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user && !!student1,
+    staleTime: 3 * 60 * 1000, // Cache for 3 minutes
+    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
+  });
+
+  // Prefetch data for student 2
+  useQuery({
+    queryKey: ["/api/sessions/recent", student2?.name],
+    queryFn: async () => {
+      const response = await fetch(`/api/sessions/recent?studentId=${encodeURIComponent(student2.name)}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user && !!student2,
+    staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  useQuery({
+    queryKey: ["/api/sessions/upcoming", student2?.name],
+    queryFn: async () => {
+      const response = await fetch(`/api/sessions/upcoming?studentId=${encodeURIComponent(student2.name)}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      return response.json();
+    },
+    enabled: !!user && !!student2,
+    staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  // Get cached data for currently selected student
   const { data: recentSessionsData, isLoading: isLoadingRecent, error: recentError } = useQuery({
     queryKey: ["/api/sessions/recent", selectedStudent],
-    queryFn: async () => {
-      const params = selectedStudent ? `?studentId=${encodeURIComponent(selectedStudent)}` : '';
-      const response = await fetch(`/api/sessions/recent${params}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return response.json();
-    },
-    enabled: !!user && !!selectedStudent,
+    enabled: false, // Don't refetch, just use cache
   });
 
-  // 2b. Load upcoming sessions when student selected (future dates from tblSessionSchedule)
   const { data: upcomingSessionsData, isLoading: isLoadingUpcoming, error: upcomingError } = useQuery({
     queryKey: ["/api/sessions/upcoming", selectedStudent],
-    queryFn: async () => {
-      const params = selectedStudent ? `?studentId=${encodeURIComponent(selectedStudent)}` : '';
-      const response = await fetch(`/api/sessions/upcoming${params}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return response.json();
-    },
-    enabled: !!user && !!selectedStudent,
+    enabled: false, // Don't refetch, just use cache
   });
 
-  // 3. Load billing last (only when billing tab active - heaviest query, lowest priority)
+  // 3. Load billing immediately after students (show account balance right away)
   const { data: billingData } = useQuery({
     queryKey: ["/api/billing"],
-    enabled: !!user && activeTab === "billing",
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
   });
 
   // Extract typed data with fallbacks
-  const students = (studentsData as any)?.students || [];
   const recentSessions = (recentSessionsData as any)?.sessions || [];
   const upcomingSessions = (upcomingSessionsData as any)?.sessions || [];
   const billing = (billingData as any)?.billing || null;
@@ -756,11 +801,16 @@ export default function Dashboard() {
                     className="mb-1"
                     style={{ color: "var(--tutoring-blue)" }}
                   >
-                    {billing?.remaining_hours?.toFixed(1) || "0.0"} hours
+                    ${billing?.accountBalance || "0.00"}
                   </h4>
                   <p className="text-muted small mb-0">
-                    Hours remaining - Click to view billing details
+                    {billing?.accountBalance > 0 ? "Amount due" : "Paid in full"} - Click for details
                   </p>
+                  {billing?.remaining_hours && (
+                    <p className="text-muted small mb-0">
+                      {billing.remaining_hours.toFixed(1)} hours remaining
+                    </p>
+                  )}
                 </div>
                 <div className="text-end">
                   <i
