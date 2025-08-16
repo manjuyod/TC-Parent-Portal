@@ -116,163 +116,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get students only (fast initial load)
-  app.get("/api/students", requireAuth, async (req, res) => {
-    try {
-      const contactPhone = req.session.contactPhone!;
-      const email = req.session.email!;
-      
-      // Get parent and student info only
-      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) {
-        return res.status(404).json({ message: "Parent data not found" });
-      }
-
-      const studentsInfo = inquiryData.students;
-
-      res.json({
-        students: studentsInfo.map((student: any) => ({
-          id: student.ID,
-          name: `${student.FirstName} ${student.LastName}`,
-          grade: 'N/A',
-          subject: 'N/A',
-          status: 'active',
-          progress: 0
-        }))
-      });
-    } catch (error) {
-      console.error('Students error:', error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Get recent sessions (from tblSessionSchedule - past dates)
-  app.get("/api/sessions/recent", requireAuth, async (req, res) => {
-    try {
-      const contactPhone = req.session.contactPhone!;
-      const email = req.session.email!;
-      const { studentId } = req.query;
-      
-      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) {
-        return res.status(404).json({ message: "Parent data not found" });
-      }
-
-      const studentsInfo = inquiryData.students;
-      const recentSessions: any[] = [];
-
-      // Find student by name (the frontend passes the selected student name)
-      const selectedStudentName = studentId; // This is actually the student name from the frontend
-      let targetStudent = null;
-      
-      if (selectedStudentName) {
-        targetStudent = studentsInfo.find((s: any) => 
-          `${s.FirstName} ${s.LastName}` === selectedStudentName
-        );
-      }
-
-      if (targetStudent) {
-        const studentSessions = await getSessions(targetStudent.ID);
-        studentSessions.forEach((session: any) => {
-          if (session.category === "recent") {
-            session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
-            session.studentId = targetStudent.ID;
-            recentSessions.push(session);
-          }
-        });
-      } else if (!selectedStudentName) {
-        // Get sessions for all students if no specific student
-        for (const student of studentsInfo) {
-          const studentSessions = await getSessions(student.ID);
-          studentSessions.forEach((session: any) => {
-            if (session.category === "recent") {
-              session.studentName = `${student.FirstName} ${student.LastName}`;
-              session.studentId = student.ID;
-              recentSessions.push(session);
-            }
-          });
-        }
-      }
-
-      res.json({
-        sessions: recentSessions
-      });
-    } catch (error) {
-      console.error('Recent sessions error:', error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Get upcoming sessions (from tblSessionSchedule - future dates)
-  app.get("/api/sessions/upcoming", requireAuth, async (req, res) => {
-    try {
-      const contactPhone = req.session.contactPhone!;
-      const email = req.session.email!;
-      const { studentId } = req.query;
-      
-      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) {
-        return res.status(404).json({ message: "Parent data not found" });
-      }
-
-      const studentsInfo = inquiryData.students;
-      const upcomingSessions: any[] = [];
-
-      // Find student by name (the frontend passes the selected student name)
-      const selectedStudentName = studentId; // This is actually the student name from the frontend
-      let targetStudent = null;
-      
-      if (selectedStudentName) {
-        targetStudent = studentsInfo.find((s: any) => 
-          `${s.FirstName} ${s.LastName}` === selectedStudentName
-        );
-      }
-
-      if (targetStudent) {
-        const studentSessions = await getSessions(targetStudent.ID);
-        studentSessions.forEach((session: any) => {
-          if (session.category === "upcoming") {
-            session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
-            session.studentId = targetStudent.ID;
-            upcomingSessions.push(session);
-          }
-        });
-      } else if (!selectedStudentName) {
-        // Get sessions for all students if no specific student
-        for (const student of studentsInfo) {
-          const studentSessions = await getSessions(student.ID);
-          studentSessions.forEach((session: any) => {
-            if (session.category === "upcoming") {
-              session.studentName = `${student.FirstName} ${student.LastName}`;
-              session.studentId = student.ID;
-              upcomingSessions.push(session);
-            }
-          });
-        }
-      }
-
-      res.json({
-        sessions: upcomingSessions
-      });
-    } catch (error) {
-      console.error('Upcoming sessions error:', error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Get billing (heavy query, load only when needed)
-  app.get("/api/billing", requireAuth, async (req, res) => {
+  // Get dashboard data
+  app.get("/api/dashboard", requireAuth, async (req, res) => {
     try {
       const inquiryId = req.session.inquiryId!;
+      const studentIds = req.session.studentIds || [];
+      const contactPhone = req.session.contactPhone!;
+      const email = req.session.email!;
       
+      // Get parent and student info
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
+      if (!inquiryData) {
+        return res.status(404).json({ message: "Parent data not found" });
+      }
+
+      const studentsInfo = inquiryData.students;
+      
+      // Get all sessions for all students
+      const allSessions: any[] = [];
+      for (const student of studentsInfo) {
+        const studentSessions = await getSessions(student.ID);
+        studentSessions.forEach((session: any) => {
+          session.studentName = `${student.FirstName} ${student.LastName}`;
+          session.studentId = student.ID;
+        });
+        allSessions.push(...studentSessions);
+      }
+
       // Get billing information
       const billingInfo = await getHoursBalance(inquiryId);
       
+      // Calculate sessions this month
+      const sessionsThisMonth = allSessions.length;
+
       res.json({
-        billing: billingInfo || null
+        students: studentsInfo.map((student: any) => {
+          const studentSessions = allSessions.filter(s => s.studentId === student.ID);
+          const nextSession = studentSessions.length > 0 ? 
+            `${studentSessions[0].Day} ${studentSessions[0].Time}` : 
+            "No sessions scheduled";
+          
+          return {
+            id: student.ID,
+            name: `${student.FirstName} ${student.LastName}`,
+            grade: 'N/A',
+            subject: 'N/A',
+            status: 'active',
+            progress: 0,
+            nextSession,
+          };
+        }),
+        sessions: allSessions,
+        billing: billingInfo ? {
+          currentBalance: '0.00',
+          monthlyRate: '320.00',
+          nextPaymentDate: 'N/A',
+          paymentMethod: 'N/A',
+          sessionsThisMonth,
+          ...billingInfo
+        } : null,
+        transactions: [], // No transaction data in legacy structure
       });
     } catch (error) {
-      console.error('Billing error:', error);
+      console.error('Dashboard error:', error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

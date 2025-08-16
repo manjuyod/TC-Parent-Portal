@@ -2,65 +2,11 @@
 
 This is a Tutoring Club Parent Portal - a full-stack TypeScript web application that allows parents to view their children's tutoring information, manage schedules, and handle billing. The application is built as a modern monorepo with a React frontend, Express.js backend, and shared schema definitions.
 
-The portal provides functionality for parent authentication using email and phone number credentials, student overview with progress tracking, session scheduling and change requests, and billing management (hours-based account balance tracking). The system was migrated from a legacy Flask/SQL Server application to a modern TypeScript stack while maintaining connection to the existing SQL Server database.
+The portal provides functionality for parent authentication using email and phone number credentials, student overview with progress tracking, session scheduling and change requests, and billing management. The system was migrated from a legacy Flask/SQL Server application to a modern TypeScript stack while maintaining connection to the existing SQL Server database.
 
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
-Data loading priority: Students first (immediate), sessions second (on-demand), billing last (tab-specific only).
-
-## Important Notes
-- **Account Balance Definition**: In this system, "account balance" refers to remaining tutoring hours, NOT monetary amounts. The billing system tracks hours purchased/used, not dollar balances.
-
-## Billing System Data Structure
-The stored procedure `USP_Report_AccountBalance` returns 5 result sets:
-- **Result Set 0**: Starting balance info (1 row)
-- **Result Set 1**: Balance calculations (1 row) - `Purchases`, `AttendancePresent`, `UnexcusedAbsences`, `MiscAdjustments`
-- **Result Set 2**: Account holder info (1 row) - `AccountHolder`, `AccountNumber`, `Students`
-- **Result Set 3**: Transaction history (234+ rows) - Account details with `FormattedDate`, `Student`, `EventType`, `Adjustment`
-- **Result Set 4**: Report metadata (1 row)
-
-### Account Balance Report Table
-- **Account Holder**: `result.recordsets[2][0].AccountHolder` - Parent/guardian name
-- **Students**: `result.recordsets[2][0].Students` - Student names from database
-- **Hours Remaining**: Calculated from `result.recordsets[1][0]` balance fields
-
-### Account Details Table  
-- **Date**: `FormattedDate` - Transaction date (MM/DD/YYYY format)
-- **Student**: `Student` - Which student the transaction applies to
-- **Event Type**: `EventType` - Type of transaction (Session Attendance, Initial Purchase, etc.)
-- **Adjustment**: `Adjustment` - Hour change (+/- decimal values)
-
-Data Source: `result.recordsets[3]` contains the 234+ account transaction records.
-
-### Data Loading Strategy
-**Current Approach**: Sequential loading without caching
-- **Step 1**: User authentication (`/api/auth/me`)
-- **Step 2**: Student data (`/api/students`)  
-- **Step 3**: Session data for selected student only (`/api/sessions/recent`, `/api/sessions/upcoming`)
-- **Step 4**: Billing data (`/api/billing`)
-
-**Key Changes**: Removed React Query caching, prefetching, and lazy loading. Each step waits for the previous to complete. Sessions load only when student is selected (no prefetching).
-
-### Frontend Mapping (dashboard.tsx)
-**Account Balance Report Table:**
-```typescript
-// Lines 545-553: Maps billing.extra[0] data
-<td>{account.AccountHolder || "N/A"}</td>
-<td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
-<td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
-```
-
-**Account Details Table:**  
-```typescript
-// Lines 606-617: Maps billing.account_details array
-<td>{detail.FormattedDate || "N/A"}</td>      // Date column
-<td>{detail.Student || "N/A"}</td>            // Student column  
-<td>{detail.EventType || "N/A"}</td>          // Event Type column
-<td>{detail.Adjustment || 0}</td>             // Adjustment column (hours +/-)
-```
-
-**Current Status**: Stored procedure `USP_Report_AccountBalance` is working correctly and returning real database data with 234+ transaction records. The billing system successfully displays account holder information, transaction history, and hours calculations.
 
 ## Recent Changes (August 2025)
 - Updated authentication system to use email as username and phone number as password
@@ -72,15 +18,6 @@ Data Source: `result.recordsets[3]` contains the 234+ account transaction record
 - Added franchise email lookup using SQL query: SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)
 - Email button automatically fetches franchise email when student is selected
 - Prioritized Gmail app on mobile with iframe detection, Gmail web interface on desktop, optimized for preview environments
-- Optimized login performance by splitting dashboard data into separate endpoints with proper loading sequence
-- Reduced initial login time by loading only essential student data first (9ms vs 20+ seconds)
-- Implemented optimized data loading sequence: inquiry ID → students → sessions (recent & upcoming) → billing 
-- Sessions now load immediately when student is selected with separate recent/upcoming endpoints
-- Fixed session data display issues - both recent and upcoming sessions now show properly
-- Added aggressive caching strategy: prefetch all student sessions data immediately after students load
-- Account balance (hours remaining) now shows immediately on login instead of only on billing tab
-- All session data cached for 2-5 minutes to eliminate reload delays when switching between students
-- React Query cache configuration optimized for instant student switching with prefetched data
 
 # System Architecture
 

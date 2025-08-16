@@ -23,88 +23,28 @@ export default function Dashboard() {
   const [submitMessage, setSubmitMessage] = useState("");
   const [franchiseEmail, setFranchiseEmail] = useState("");
 
-  // Sequential loading: 1. User → 2. Students → 3. Sessions → 4. Billing
-  const { data: user, isLoading: userLoading } = useQuery({
+  const { data: user } = useQuery({
     queryKey: ["/api/auth/me"],
   });
 
-  // 2. Load students after user is authenticated
-  const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: ["/api/students"],
+  const { data: dashboardData } = useQuery({
+    queryKey: ["/api/dashboard"],
     enabled: !!user,
   });
 
-  const students = (studentsData as any)?.students || [];
+  // Extract typed data with fallbacks
+  const students = (dashboardData as any)?.students || [];
+  const sessions = (dashboardData as any)?.sessions || [];
+  const billing = (dashboardData as any)?.billing || null;
 
-  // 3. Load sessions for selected student only (no prefetching)
-  const { data: recentSessionsData, isLoading: isLoadingRecent, error: recentError } = useQuery({
-    queryKey: ["/api/sessions/recent", selectedStudent],
-    queryFn: async () => {
-      if (!selectedStudent) return { sessions: [] };
-      const response = await fetch(`/api/sessions/recent?studentId=${encodeURIComponent(selectedStudent)}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    },
-    enabled: !!user && !!selectedStudent,
-  });
-
-  const { data: upcomingSessionsData, isLoading: isLoadingUpcoming, error: upcomingError } = useQuery({
-    queryKey: ["/api/sessions/upcoming", selectedStudent],
-    queryFn: async () => {
-      if (!selectedStudent) return { sessions: [] };
-      const response = await fetch(`/api/sessions/upcoming?studentId=${encodeURIComponent(selectedStudent)}`);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    },
-    enabled: !!user && !!selectedStudent,
-  });
-
-  // 4. Load billing after students are loaded
-  const { data: billingData, isLoading: billingLoading } = useQuery({
-    queryKey: ["/api/billing"],
-    enabled: !!user && !!studentsData,
-  });
-
-  // Extract data
-  const recentSessions = (recentSessionsData as any)?.sessions || [];
-  const upcomingSessions = (upcomingSessionsData as any)?.sessions || [];
-  const billing = (billingData as any)?.billing || null;
-
-  // Show loading states based on sequential loading
-  if (userLoading || !user) {
+  if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
         <div className="text-center">
           <div className="spinner-border text-primary mb-4" role="status">
             <span className="visually-hidden">Loading...</span>
           </div>
-          <p className="text-muted">Loading your account...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (studentsLoading || !studentsData) {
-    return (
-      <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
-        <div className="text-center">
-          <div className="spinner-border text-primary mb-4" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </div>
-          <p className="text-muted">Loading student information...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (billingLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
-        <div className="text-center">
-          <div className="spinner-border text-primary mb-4" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </div>
-          <p className="text-muted">Loading billing information...</p>
+          <p className="text-muted">Loading...</p>
         </div>
       </div>
     );
@@ -112,7 +52,13 @@ export default function Dashboard() {
 
   const user_data = (user as any)?.parent;
 
-  // Sessions are already filtered by student in the API calls
+  // Filter sessions based on selected student
+  const filteredSessions =
+    selectedStudent && sessions
+      ? sessions.filter(
+          (session: any) => session.studentName === selectedStudent,
+        )
+      : [];
 
   const handleLogout = async () => {
     try {
@@ -232,12 +178,12 @@ export default function Dashboard() {
           <h3 style={{ marginBottom: "30px" }}>Schedule Management</h3>
 
           {/* Current Schedule */}
-          {(recentSessions.length > 0 || upcomingSessions.length > 0) ? (
+          {filteredSessions && filteredSessions.length > 0 ? (
             <div className="card mb-4">
               <div className="card-header">
                 <h5 style={{ color: "white", margin: 0 }}>
                   Current Schedule for {selectedStudent} (
-                  {recentSessions.length + upcomingSessions.length} sessions)
+                  {filteredSessions.length} sessions)
                 </h5>
               </div>
               <div className="card-body">
@@ -252,7 +198,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {[...recentSessions, ...upcomingSessions].map((session: any, index: number) => (
+                      {filteredSessions.map((session: any, index: number) => (
                         <tr key={index}>
                           <td>{session.Day || "N/A"}</td>
                           <td>{session.Time || "N/A"}</td>
@@ -495,96 +441,34 @@ export default function Dashboard() {
               <h5 style={{ color: "white", margin: 0 }}>Account Balance Report</h5>
             </div>
             <div className="card-body">
-              {!billing ? (
-                <div className="text-center py-4">
-                  <div className="spinner-border text-primary mb-3" role="status">
-                    <span className="visually-hidden">Loading billing information...</span>
-                  </div>
-                  <p className="text-muted">Loading your account balance...</p>
-                </div>
-              ) : (
-                <>
-                  <div className="table-container">
-                    <table className="table table-striped table-sm">
-                      <thead>
-                        <tr>
-                          <th>Account Holder</th>
-                          <th>Students</th>
-                          <th>Hours Remaining</th>
+              <div className="table-container">
+                <table className="table table-striped table-sm">
+                  <thead>
+                    <tr>
+                      <th>Account Holder</th>
+                      <th>Students</th>
+                      <th>Hours Remaining</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {billing?.extra && billing.extra.length > 0 ? (
+                      billing.extra.map((account: any, index: number) => (
+                        <tr key={index}>
+                          <td>{account.AccountHolder || "N/A"}</td>
+                          <td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
+                          <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {billing?.extra && billing.extra.length > 0 ? (
-                          billing.extra.map((account: any, index: number) => (
-                            <tr key={index}>
-                              <td>{account.AccountHolder || "N/A"}</td>
-                              <td>{account.Students || students.map((s: any) => s.name).join(", ") || "No students assigned"}</td>
-                              <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={3} className="text-center text-muted">
-                              No account information available
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  {/* Show detailed balance breakdown */}
-                  {billing?.balance && (
-                    <div className="mt-4">
-                      <h6 className="mb-3">Balance Details:</h6>
-                      <div className="row">
-                        <div className="col-md-6">
-                          <div className="card bg-light">
-                            <div className="card-body p-3">
-                              <h6 className="card-title mb-2">Purchases</h6>
-                              <p className="card-text h5 text-success">
-                                {billing.balance.Purchases !== null ? `${billing.balance.Purchases} hours` : "No purchase data"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="col-md-6">
-                          <div className="card bg-light">
-                            <div className="card-body p-3">
-                              <h6 className="card-title mb-2">Attendance (Present)</h6>
-                              <p className="card-text h5 text-info">
-                                {billing.balance.AttendancePresent !== null ? `${billing.balance.AttendancePresent} hours` : "No attendance data"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="row mt-3">
-                        <div className="col-md-6">
-                          <div className="card bg-light">
-                            <div className="card-body p-3">
-                              <h6 className="card-title mb-2">Unexcused Absences</h6>
-                              <p className="card-text h5 text-warning">
-                                {billing.balance.UnexcusedAbsences !== null ? `${billing.balance.UnexcusedAbsences} hours` : "No absence data"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="col-md-6">
-                          <div className="card bg-light">
-                            <div className="card-body p-3">
-                              <h6 className="card-title mb-2">Misc Adjustments</h6>
-                              <p className="card-text h5 text-secondary">
-                                {billing.balance.MiscAdjustments !== null ? `${billing.balance.MiscAdjustments} hours` : "No adjustment data"}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="text-center text-muted">
+                          No account information available
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -820,7 +704,7 @@ export default function Dashboard() {
               <div className="card-body d-flex justify-content-between align-items-start">
                 <div>
                   <p className="text-muted mb-1 small text-uppercase">
-                    Account Balance (Hours)
+                    Account Balance
                   </p>
                   <h4
                     className="mb-1"
@@ -829,7 +713,7 @@ export default function Dashboard() {
                     {billing?.remaining_hours?.toFixed(1) || "0.0"} hours
                   </h4>
                   <p className="text-muted small mb-0">
-                    Hours remaining - Click for billing details
+                    Hours remaining - Click to view billing details
                   </p>
                 </div>
                 <div className="text-end">
@@ -866,26 +750,18 @@ export default function Dashboard() {
                 </h6>
               </div>
               <div className="card-body">
-                {!selectedStudent ? (
-                  <div className="alert alert-info small">
-                    Select a student to view recent sessions.
-                  </div>
-                ) : isLoadingRecent ? (
-                  <div className="d-flex justify-content-center p-3">
-                    <div className="spinner-border text-primary" role="status">
-                      <span className="visually-hidden">Loading recent sessions...</span>
-                    </div>
-                  </div>
-                ) : recentError ? (
-                  <div className="alert alert-danger small">
-                    Error loading recent sessions. Please try again.
-                  </div>
-                ) : recentSessions && recentSessions.length > 0 ? (
+                {selectedStudent &&
+                filteredSessions &&
+                filteredSessions.length > 0 ? (
                   <div
                     className="timeline-container"
                     style={{ maxHeight: "300px", overflowY: "auto" }}
                   >
-                    {recentSessions
+                    {filteredSessions
+                      .filter(
+                        (session: any) =>
+                          session && session.category === "recent",
+                      )
                       .slice(0, 5)
                       .map((session: any, index: number) => (
                         <div
@@ -923,9 +799,13 @@ export default function Dashboard() {
                         </div>
                       ))}
                   </div>
-                ) : (
+                ) : selectedStudent ? (
                   <div className="alert alert-info small">
                     No recent sessions found for {selectedStudent}.
+                  </div>
+                ) : (
+                  <div className="alert alert-info small">
+                    Select a student to view recent sessions.
                   </div>
                 )}
               </div>
@@ -946,22 +826,14 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  {!selectedStudent ? (
-                    <div className="alert alert-info small">
-                      Select a student to view upcoming sessions.
-                    </div>
-                  ) : isLoadingUpcoming ? (
-                    <div className="d-flex justify-content-center p-3">
-                      <div className="spinner-border text-primary" role="status">
-                        <span className="visually-hidden">Loading upcoming sessions...</span>
-                      </div>
-                    </div>
-                  ) : upcomingError ? (
-                    <div className="alert alert-danger small">
-                      Error loading upcoming sessions. Please try again.
-                    </div>
-                  ) : upcomingSessions && upcomingSessions.length > 0 ? (
-                    upcomingSessions
+                  {selectedStudent &&
+                  filteredSessions &&
+                  filteredSessions.length > 0 ? (
+                    filteredSessions
+                      .filter(
+                        (session: any) =>
+                          session && session.category === "upcoming",
+                      )
                       .slice(0, 4)
                       .map((session: any, index: number) => (
                         <div
@@ -1002,9 +874,13 @@ export default function Dashboard() {
                           </div>
                         </div>
                       ))
-                  ) : (
+                  ) : selectedStudent ? (
                     <div className="alert alert-info small">
                       No upcoming sessions found for {selectedStudent}.
+                    </div>
+                  ) : (
+                    <div className="alert alert-info small">
+                      Select a student to view upcoming sessions.
                     </div>
                   )}
                 </div>
