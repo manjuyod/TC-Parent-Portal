@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,8 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { CalendarX, Edit } from "lucide-react";
-import EmailButton, { type ScheduleChangeDetails } from "./EmailButton";
-import { EmailTestButton } from "./EmailTestButton";
 
 interface ScheduleTabProps {
   data: any;
@@ -27,38 +27,55 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
   const { toast } = useToast();
   const { sessions } = data;
 
-  // Get user data to access inquiry ID
-  const { data: user } = useQuery({
-    queryKey: ["/api/auth/me"],
+  const scheduleChangeMutation = useMutation({
+    mutationFn: async (requestData: any) => {
+      const response = await apiRequest("POST", "/api/schedule-change-request", requestData);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Request Submitted",
+        description: data.message,
+      });
+      // Reset form
+      setSelectedStudent("");
+      setCurrentSession("");
+      setPreferredDate("");
+      setPreferredTime("");
+      setRequestedChange("");
+      setReason("");
+      
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to submit schedule change request",
+        variant: "destructive",
+      });
+    },
   });
 
-  const getSelectedStudentName = () => {
-    const student = students.find(s => s.id.toString() === selectedStudent);
-    return student ? student.name : "";
-  };
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedStudent || !currentSession || !preferredDate || !preferredTime || !requestedChange) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
 
-  const isFormValid = () => {
-    return selectedStudent && currentSession && preferredDate && preferredTime && requestedChange;
-  };
-
-  const buildScheduleDetails = (): ScheduleChangeDetails => {
-    const requestedDateTime = `${preferredDate} ${preferredTime}`;
-    return {
-      current: currentSession,
-      requested: requestedDateTime,
-      reason: reason || "No specific reason provided",
-      effectiveDate: preferredDate,
-      notes: requestedChange
-    };
-  };
-
-  const handleFormReset = () => {
-    setSelectedStudent("");
-    setCurrentSession("");
-    setPreferredDate("");
-    setPreferredTime("");
-    setRequestedChange("");
-    setReason("");
+    scheduleChangeMutation.mutate({
+      studentId: selectedStudent,
+      currentSession,
+      preferredDate,
+      preferredTime,
+      requestedChange,
+      reason,
+    });
   };
 
   const getStatusColor = (status: string | undefined) => {
@@ -140,8 +157,7 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
         </CardHeader>
         
         <CardContent className="p-6">
-          <EmailTestButton />
-          <div className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <Label htmlFor="student_select" className="block text-sm font-semibold text-text-dark mb-2">
                 Student
@@ -152,7 +168,7 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {students.map((student) => (
-                    <SelectItem key={student.id} value={student.id.toString()}>
+                    <SelectItem key={student.id} value={student.id}>
                       {student.name}
                     </SelectItem>
                   ))}
@@ -228,26 +244,14 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
               />
             </div>
             
-            {isFormValid() && user?.parent?.id ? (
-              <EmailButton
-                inquiryId={user.parent.id}
-                studentName={getSelectedStudentName()}
-                details={buildScheduleDetails()}
-                prefer="auto"
-                className="bg-tutoring-orange text-white py-3 px-6 rounded-lg font-semibold hover:bg-opacity-90 transition-colors"
-              />
-            ) : (
-              <div className="w-full bg-gray-300 text-gray-500 py-3 px-6 rounded-lg font-semibold text-center">
-                {!isFormValid() ? "Please fill in all required fields" : "Loading..."}
-              </div>
-            )}
-            
-            {isFormValid() && (
-              <div className="text-sm text-gray-600 text-center">
-                Clicking "Email Home Center" will open your email app with a pre-filled message to your tutoring center.
-              </div>
-            )}
-          </div>
+            <Button
+              type="submit"
+              disabled={scheduleChangeMutation.isPending}
+              className="w-full bg-tutoring-orange text-white py-3 px-6 rounded-lg font-semibold hover:bg-opacity-90 transition-colors"
+            >
+              {scheduleChangeMutation.isPending ? "Submitting..." : "Submit Request"}
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>

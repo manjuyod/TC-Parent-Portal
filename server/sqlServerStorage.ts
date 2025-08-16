@@ -348,26 +348,6 @@ export async function searchStudent(email: string, contactNum: string) {
   }
 }
 
-export async function getFranchiseCenterEmail(inquiryId: number): Promise<string | null> {
-  try {
-    const request = pool.request();
-    request.input('InquiryID', sql.Int, inquiryId);
-    
-    // Execute the exact SQL query as specified in requirements
-    const query = `SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FrachiesID FROM tblInquiry WHERE ID = @InquiryID)`;
-    const result = await request.query(query);
-    
-    if (result.recordset && result.recordset.length > 0) {
-      return result.recordset[0].FranchiesEmail;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error("Error getting franchise center email:", error);
-    return null;
-  }
-}
-
 export async function submitScheduleChangeRequest(requestData: {
   studentId: number;
   currentSession: string;
