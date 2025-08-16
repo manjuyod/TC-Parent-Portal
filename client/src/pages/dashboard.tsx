@@ -532,34 +532,96 @@ export default function Dashboard() {
               <h5 style={{ color: "white", margin: 0 }}>Account Balance Report</h5>
             </div>
             <div className="card-body">
-              <div className="table-container">
-                <table className="table table-striped table-sm">
-                  <thead>
-                    <tr>
-                      <th>Account Holder</th>
-                      <th>Students</th>
-                      <th>Hours Remaining</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {billing?.extra && billing.extra.length > 0 ? (
-                      billing.extra.map((account: any, index: number) => (
-                        <tr key={index}>
-                          <td>{account.AccountHolder || "N/A"}</td>
-                          <td>{account.Students || students.map((s: any) => s.name).join(", ")}</td>
-                          <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
+              {!billing ? (
+                <div className="text-center py-4">
+                  <div className="spinner-border text-primary mb-3" role="status">
+                    <span className="visually-hidden">Loading billing information...</span>
+                  </div>
+                  <p className="text-muted">Loading your account balance...</p>
+                </div>
+              ) : (
+                <>
+                  <div className="table-container">
+                    <table className="table table-striped table-sm">
+                      <thead>
+                        <tr>
+                          <th>Account Holder</th>
+                          <th>Students</th>
+                          <th>Hours Remaining</th>
                         </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={3} className="text-center text-muted">
-                          No account information available
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {billing?.extra && billing.extra.length > 0 ? (
+                          billing.extra.map((account: any, index: number) => (
+                            <tr key={index}>
+                              <td>{account.AccountHolder || "N/A"}</td>
+                              <td>{account.Students || students.map((s: any) => s.name).join(", ") || "No students assigned"}</td>
+                              <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={3} className="text-center text-muted">
+                              No account information available
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  {/* Show detailed balance breakdown */}
+                  {billing?.balance && (
+                    <div className="mt-4">
+                      <h6 className="mb-3">Balance Details:</h6>
+                      <div className="row">
+                        <div className="col-md-6">
+                          <div className="card bg-light">
+                            <div className="card-body p-3">
+                              <h6 className="card-title mb-2">Purchases</h6>
+                              <p className="card-text h5 text-success">
+                                {billing.balance.Purchases !== null ? `${billing.balance.Purchases} hours` : "No purchase data"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="card bg-light">
+                            <div className="card-body p-3">
+                              <h6 className="card-title mb-2">Attendance (Present)</h6>
+                              <p className="card-text h5 text-info">
+                                {billing.balance.AttendancePresent !== null ? `${billing.balance.AttendancePresent} hours` : "No attendance data"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="row mt-3">
+                        <div className="col-md-6">
+                          <div className="card bg-light">
+                            <div className="card-body p-3">
+                              <h6 className="card-title mb-2">Unexcused Absences</h6>
+                              <p className="card-text h5 text-warning">
+                                {billing.balance.UnexcusedAbsences !== null ? `${billing.balance.UnexcusedAbsences} hours` : "No absence data"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="card bg-light">
+                            <div className="card-body p-3">
+                              <h6 className="card-title mb-2">Misc Adjustments</h6>
+                              <p className="card-text h5 text-secondary">
+                                {billing.balance.MiscAdjustments !== null ? `${billing.balance.MiscAdjustments} hours` : "No adjustment data"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
 
