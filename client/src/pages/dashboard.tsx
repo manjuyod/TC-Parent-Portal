@@ -107,11 +107,14 @@ export default function Dashboard() {
 
   // 3. Load billing immediately after students (show account balance right away)
   const { data: billingData } = useQuery({
-    queryKey: ["/api/billing"],
+    queryKey: ["/api/billing", Date.now()], // Force fresh request
     enabled: !!user,
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    gcTime: 10 * 60 * 1000, // Keep in memory for 10 minutes
+    staleTime: 0,
+    gcTime: 0,
   });
+
+  // Log what we're getting from billing API
+  console.log("Billing data received:", billingData);
 
   // Extract typed data with fallbacks
   const recentSessions = (recentSessionsData as any)?.sessions || [];

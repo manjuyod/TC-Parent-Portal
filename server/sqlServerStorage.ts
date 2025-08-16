@@ -120,6 +120,11 @@ export async function getHoursBalance(inquiryId: number) {
         remainingHours = purchases + attendance + absences + adjustments;
       }
 
+      console.log("Returning billing data:");
+      console.log("- extraData:", JSON.stringify(extraData, null, 2));
+      console.log("- accountDetails count:", accountDetails.length);
+      console.log("- remainingHours:", remainingHours);
+      
       return {
         balance: balanceData,
         extra: extraData,
