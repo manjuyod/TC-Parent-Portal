@@ -2,7 +2,6 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest, getFranchiseEmail } from "./sqlServerStorage";
 import { emailService } from "./emailService";
-import { registerEmailTestRoute } from "./src/routes/email.test.route";
 import { loginSchema } from "@shared/schema";
 import session from "express-session";
 
@@ -267,9 +266,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Internal server error" });
     }
   });
-
-  // Register email test route
-  registerEmailTestRoute(app);
 
   const httpServer = createServer(app);
   return httpServer;
