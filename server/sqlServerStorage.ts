@@ -57,6 +57,16 @@ export async function getHoursBalance(inquiryId: number) {
         "dpinkney_TC.dbo.USP_Report_AccountBalance",
       );
 
+      console.log('Stored procedure result sets count:', result.recordsets?.length);
+      if (result.recordsets) {
+        result.recordsets.forEach((recordset, index) => {
+          console.log(`Result set ${index + 1}:`, recordset.length, 'records');
+          if (recordset.length > 0) {
+            console.log(`Sample from result set ${index + 1}:`, recordset[0]);
+          }
+        });
+      }
+
       let balanceData = {};
       let extraData: any[] = [];
       let accountDetails: any[] = [];
@@ -75,6 +85,7 @@ export async function getHoursBalance(inquiryId: number) {
         // Fourth result set (Account Details)
         if (result.recordsets.length > 3) {
           accountDetails = result.recordsets[3] || [];
+          console.log('Account details from result set 4:', accountDetails);
         }
 
         // Calculate remaining hours
@@ -114,7 +125,10 @@ export async function getHoursBalance(inquiryId: number) {
         account_details: [
           { Description: "Initial Purchase", Amount: 10.0, Date: "2025-07-01", Type: "Credit" },
           { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-15", Type: "Debit" },
-          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-22", Type: "Debit" }
+          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-22", Type: "Debit" },
+          { Description: "Balance Adjustment", Amount: 2.0, Date: "2025-08-01", Type: "Credit" },
+          { Description: "Session Attendance", Amount: -1.5, Date: "2025-08-05", Type: "Debit" },
+          { Description: "Package Purchase", Amount: 15.0, Date: "2025-08-10", Type: "Credit" }
         ],
         remaining_hours: 5.0,
       };
