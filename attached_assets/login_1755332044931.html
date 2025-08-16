@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Tutoring Club Parent Portal</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --tutoring-blue: #4a7aa6;
+            --tutoring-orange: #e5773f;
+            --light-blue: #5ba3c7;
+            --light-orange: #f19569;
+            --gold: #f4d03f;
+            --cream: #fff8e1;
+            --text-dark: #2c3e50;
+            --text-light: #5a6c7d;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--light-blue), var(--tutoring-blue));
+            min-height: 100vh;
+            font-family: 'Bitter', serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+            max-width: 400px;
+            width: 100%;
+        }
+
+        .login-header {
+            background: var(--cream);
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .login-logo {
+            height: 60px;
+            width: auto;
+            margin-bottom: 15px;
+        }
+
+        .login-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--tutoring-blue);
+            margin: 0;
+        }
+
+        .login-body {
+            padding: 30px;
+        }
+
+        .form-control {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            transition: all 0.3s ease;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .form-control:focus {
+            border-color: var(--tutoring-blue);
+            box-shadow: 0 0 0 0.2rem rgba(74, 122, 166, 0.25);
+        }
+
+        .form-label {
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 8px;
+        }
+
+        .btn-primary {
+            background: var(--tutoring-blue);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            color: white;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        .btn-primary:hover {
+            background: #3a648a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(74, 122, 166, 0.3);
+        }
+
+        .btn-outline-primary {
+            color: var(--tutoring-orange);
+            border: 2px solid var(--tutoring-orange);
+            border-radius: 8px;
+            padding: 10px 22px;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            background: transparent;
+            width: 100%;
+        }
+
+        .btn-outline-primary:hover {
+            background: var(--tutoring-orange);
+            border-color: var(--tutoring-orange);
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .alert {
+            border: none;
+            border-radius: 8px;
+            padding: 15px;
+            font-weight: 500;
+            margin-bottom: 20px;
+        }
+
+        .alert-danger {
+            background: #ffeaea;
+            color: #d32f2f;
+            border-left: 4px solid #d32f2f;
+        }
+
+        .alert-success {
+            background: #e8f5e8;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+
+        .alert-info {
+            background: #fff3e0;
+            color: var(--tutoring-orange);
+            border-left: 4px solid var(--tutoring-orange);
+        }
+
+        .alert-warning {
+            background: #fff3e0;
+            color: #f57c00;
+            border-left: 4px solid #f57c00;
+        }
+
+        .text-center a {
+            color: var(--tutoring-blue);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .text-center a:hover {
+            color: var(--light-blue);
+            text-decoration: underline;
+        }
+
+        .info-text {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-light);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-header">
+            <img src="{{ url_for('static', filename='images/logo.webp') }}" alt="Tutoring Club Logo" class="login-logo">
+            <h1 class="login-title">Parent Portal Login</h1>
+        </div>
+
+        <div class="login-body">
+            <!-- Flash Messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ 'danger' if category == 'danger' else 'success' if category == 'success' else 'warning' if category == 'warning' else 'info' }}" role="alert">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+            {% endwith %}
+
+            <div class="info-text">
+                Enter your contact phone number to access your student information
+            </div>
+
+            <form method="POST">
+                <div class="mb-3">
+                    <label for="contact_number" class="form-label">Contact Phone Number</label>
+                    <input type="tel" class="form-control" id="contact_number" name="contact_number" placeholder="(555) 123-4567" required>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+
+            <div class="text-center mt-3">
+                <small class="text-muted">
+                    Enter your registered contact number to access your account
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

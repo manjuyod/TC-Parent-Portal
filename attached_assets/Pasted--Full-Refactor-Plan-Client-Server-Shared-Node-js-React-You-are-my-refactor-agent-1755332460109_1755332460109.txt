@@ -1,0 +1,280 @@
+---
+
+# ✳️ Full Refactor Plan — Client/Server/Shared (Node.js + React)
+
+You are my refactor agent. I uploaded legacy app files. Rebuild the app as a modern **TypeScript monorepo** with three packages:
+
+* `client/` → React (Vite + TS)
+* `server/` → Node (Fastify + TS)
+* `shared/` → shared zod schemas, types, and a typed HTTP client
+
+Follow these **rules**:
+
+* Keep each step **≤150 changed lines** and **one focused commit**; split work when bigger.
+* Add/modify only the files listed per step (“Edits allowed”).
+* Each step must have **Success checks** I can run.
+* Prefer **Zod** for runtime validation.
+* Use **Replit-friendly** ports & binds: server listens on `process.env.PORT || 4000`, host `0.0.0.0`.
+* Security by default: CORS allowlist by env, Helmet/CSP, rate limiting, sanitized errors.
+* Test framework: **Vitest**; HTTP tests via **Fastify inject** or **supertest**.
+
+---
+
+## STEP 0 — Workspace bootstrap
+
+**Edits allowed:** repo root only.
+
+**Do:**
+
+1. Create root `package.json` with workspaces: `["client","server","shared"]` and scripts:
+
+   * `"dev": "concurrently -n server,client -c magenta,blue \"npm -w server run dev\" \"npm -w client run dev\""`
+   * `"build": "npm -w shared run build && npm -w server run build && npm -w client run build"`
+   * `"test": "npm -w server run test && npm -w shared run test || true"`
+2. Add `.gitignore` (node\_modules, dist, .env\*, coverage, .vite, .turbo).
+3. Add `.editorconfig`, and minimal `README.md` with run commands.
+
+**Success checks:**
+
+* `npm install` succeeds.
+* `npm run` lists the scripts above.
+* Commit: `chore(root): init workspaces + scripts`.
+
+---
+
+## STEP 1 — Scaffold `shared/` (types & utils)
+
+**Edits allowed:** `shared/**`, root only for workspace metadata.
+
+**Do:**
+
+1. `shared/package.json` with `"type":"module"`, build script (tsc), and exports.
+2. `shared/tsconfig.json` (ES2022, strict, declarations).
+3. `shared/src/index.ts` exporting:
+
+   * `env.ts`: zod schema for env used by server & client (e.g., API\_BASE, CORS\_ORIGINS).
+   * `http.ts`: tiny fetch wrapper with typed `get/post` and zod-validated responses.
+   * `schemas/*.ts`: starter zod schemas (e.g., `ExampleResponse = z.object({ message: z.string() })`).
+
+**Tests:** Vitest unit tests for `http.ts` (mock fetch) and `schemas`.
+
+**Success checks:**
+
+* `npm -w shared run build` OK, `npm -w shared run test` OK.
+* Commit: `feat(shared): base zod schemas + typed http client`.
+
+---
+
+## STEP 2 — Scaffold `server/` (Fastify + security)
+
+**Edits allowed:** `server/**`.
+
+**Do:**
+
+1. `server/package.json` with scripts:
+
+   * `"dev": "tsx src/index.ts"`
+   * `"build": "tsc -p tsconfig.json"`
+   * `"test": "vitest run"`
+2. `server/tsconfig.json` (ES2022, module ESNext).
+3. `server/src/index.ts`:
+
+   * Fastify app with:
+
+     * **helmet** (CSP default), **@fastify/cors** with **allowlist** from env (`CORS_ORIGINS`, comma-sep; default `*` in dev).
+     * **rate limit** (e.g., `@fastify/rate-limit`, 100 req/min/IP).
+     * health route `GET /health -> { ok: true }`.
+     * versioned API `prefix: /v1`.
+     * OpenAPI via `@fastify/swagger` + `@fastify/swagger-ui` at `/docs`, loading from code or a generated spec.
+     * global error handler that returns safe `{ error, code }` and hides internals.
+   * Read env via `dotenv`, validate with the **shared** `env.ts`.
+   * Bind `host:"0.0.0.0", port: process.env.PORT || 4000`.
+4. `server/src/routes/example.ts`: `GET /v1/example -> { message:"ok" }` validated by **shared** `ExampleResponse`.
+5. Vitest config + tests:
+
+   * inject server, assert `/health` 200 `{ ok:true }`, `/v1/example` 200.
+
+**Success checks:**
+
+* `npm -w server run test` green.
+* `npm -w server run dev` boots; `/docs` loads.
+* Commit: `feat(server): fastify scaffold with security, docs, health + example`.
+
+---
+
+## STEP 3 — Scaffold `client/` (Vite React TS)
+
+**Edits allowed:** `client/**`.
+
+**Do:**
+
+1. Create Vite React TS app in `client/` with scripts `dev/build/test`.
+2. `.env.development` with `VITE_API_BASE=http://localhost:4000`.
+3. `src/api.ts` using `shared`’s typed HTTP client (`shared/http.ts`) and shared schemas.
+4. `src/App.tsx`:
+
+   * Calls `/v1/example` on mount and renders JSON.
+   * Shows a basic page and handles error states.
+
+**Success checks:**
+
+* `npm -w client run dev` serves on Vite’s default port; page shows `{ message: "ok" }`.
+* Commit: `feat(client): vite react scaffold + api wiring`.
+
+---
+
+## STEP 4 — Inventory & migration plan (from legacy)
+
+**Edits allowed:** `MIGRATION_PLAN.md`, `scripts/**` (optional inventory script).
+
+**Do:**
+
+1. Scan legacy source and produce `MIGRATION_PLAN.md` table(s):
+
+   * **Functions**: legacy file → function → new home (`shared/src/lib/*.ts` or `server/src/services/*.ts`) → inputs/outputs → tests needed.
+   * **Endpoints**: legacy route/path → new `/v1/*` → request/response zod schemas → UI caller(s).
+2. (Optional) add `scripts/inventory.[ts|py]` to list function names & route decorators.
+
+**Success checks:**
+
+* Plan file exists with at least 5 concrete mappings (or all available).
+* Commit: `docs: add migration plan for functions and endpoints`.
+
+---
+
+## STEP 5 — Migrate **pure functions** to `shared/`
+
+**Edits allowed:** `shared/src/lib/**`, `shared/src/schemas/**`, `shared/tests/**`, `MIGRATION_PLAN.md`.
+
+**Do (repeat per function):**
+
+1. Move/refactor a pure function into `shared/src/lib/<name>.ts` with full TypeScript types.
+2. Add/extend zod schemas in `shared/src/schemas` if I/O needs runtime validation.
+3. Create **Vitest** unit tests derived from legacy examples/fixtures; ensure parity (same inputs → same outputs).
+
+**Success checks:**
+
+* `npm -w shared run test` green.
+* Update `MIGRATION_PLAN.md`“migrated: yes”.
+* Commit (one per function): `feat(shared): migrate <fnName> with tests`.
+
+---
+
+## STEP 6 — Migrate **server endpoints** to `/v1`
+
+**Edits allowed:** `server/src/routes/**`, `server/src/services/**`, `server/tests/**`, `server/src/index.ts`, `server/openapi.*` (if file-based).
+
+**Do (repeat per endpoint):**
+
+1. Define zod schemas (params/query/body/response) — reuse from `shared` where possible.
+2. Implement handler in `server/src/routes/<feature>.ts`, delegate logic to `server/src/services` or **shared** fns.
+3. Add tests (Fastify inject): happy path + validation error (400).
+4. Extend OpenAPI (code or JSON) for endpoint (params, requestBody, responses).
+
+**Security in each route:**
+
+* Validate **all** inputs with zod.
+* Send **safe errors** only.
+* If auth is needed later, leave a clear `// TODO auth` hook (and rate-limit sensitive routes).
+
+**Success checks:**
+
+* `npm -w server run test` still green; new tests pass.
+* `/docs` shows the new route(s).
+* Commit (one per endpoint): `feat(server): port <METHOD> <path> to /v1 (+tests)`.
+
+---
+
+## STEP 7 — Wire **client pages** to new endpoints
+
+**Edits allowed:** `client/src/pages/**`, `client/src/api.ts`, `client/src/routes.tsx` (if using react-router), minimal CSS.
+
+**Do (repeat per feature):**
+
+1. Build a simple page or component that calls the new `/v1/*` route through `client/src/api.ts` (which uses **shared** client).
+2. Validate forms with **zod** (client-side) before sending; handle error states clearly.
+3. No UI overhaul — just functional parity.
+
+**Success checks:**
+
+* Page renders data/errors correctly against local server.
+* Commit: `feat(client): connect <feature> to /v1`.
+
+---
+
+## STEP 8 — Security hardening pass
+
+**Edits allowed:** `server/**`, `shared/**`, root scripts.
+
+**Do:**
+
+1. **Helmet**: ensure CSP reasonable for dev; disable in dev if needed, document.
+2. **CORS**: only allow `CORS_ORIGINS` from env; default `*` in dev; error otherwise.
+3. **Rate limit**: ensure global + per-route overrides.
+4. **Secrets**: `.env.example` with required vars; validate with zod at startup (fail fast).
+5. **Headers**: remove `x-powered-by`; set `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` via helmet.
+6. **Logging**: structured logs (pino) with redaction of `authorization`, `cookie`, `password` fields.
+7. **Dependency hygiene**: pin major versions; add `npm run audit:prod` (non-breaking) and document upgrades.
+
+**Success checks:**
+
+* Curl from disallowed origin blocked (manual if needed).
+* Startup fails if required env is missing.
+* Commit: `chore(security): tighten headers, cors, ratelimit, env validation`.
+
+---
+
+## STEP 9 — Quality gates
+
+**Edits allowed:** root & package configs.
+
+**Do:**
+
+1. Add root scripts: `"typecheck"`, `"lint"`, `"format"`, `"coverage"`.
+2. ESLint configs for client/server (TS + React), minimal rules.
+3. Vitest coverage threshold (e.g., lines ≥ 70%) for server and shared.
+4. (Optional) Husky pre-push: run `typecheck` + server tests.
+
+**Success checks:**
+
+* `npm run typecheck` passes.
+* `npm -w server run test -- --coverage` → threshold met.
+* Commit: `ci: add typecheck+lint+coverage baselines`.
+
+---
+
+## STEP 10 — Developer DX
+
+**Edits allowed:** root + docs.
+
+**Do:**
+
+1. Update `README.md` with **one-command dev**: `npm run dev`.
+2. Document env vars and security defaults.
+3. Add `scripts/dev.sh` (optional) that starts both with colored logs.
+
+**Success checks:**
+
+* New dev can read README and get both apps running in ≤2 minutes.
+* Commit: `docs: usage and dev guide`.
+
+---
+
+### Final Acceptance
+
+* `npm run dev` → server (on 4000) + client (vite) both run; navigating to the client shows data from `/v1/example`.
+* All tests pass; coverage threshold met.
+* `/docs` shows all server endpoints with correct params/body/response.
+* `MIGRATION_PLAN.md` reflects what was migrated and what remains.
+
+---
+
+**Important constraints**
+
+* Do not delete legacy files; **only** reference/migrate them into the new structure. Leave a note in `MIGRATION_PLAN.md` for any unported code.
+* Keep each commit focused; if you need to touch multiple areas, make **multiple small commits**.
+* If something is ambiguous, create a failing test first, then implement to make it pass.
+
+---
+
+If you need anything else, ask — but please start at **STEP 0** and proceed sequentially, committing after each step passes its success checks.
