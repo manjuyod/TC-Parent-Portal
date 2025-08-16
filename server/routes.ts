@@ -149,11 +149,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get recent sessions (from tblSessionSchedule - past dates)
   app.get("/api/sessions/recent", requireAuth, async (req, res) => {
     try {
-      console.log('[RECENT SESSIONS] API endpoint hit');
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
       const { studentId } = req.query;
-      console.log('[RECENT SESSIONS] studentId from query:', studentId);
       
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
@@ -167,21 +165,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedStudentName = studentId; // This is actually the student name from the frontend
       let targetStudent = null;
       
-      console.log(`[RECENT] Looking for student: "${selectedStudentName}"`);
-      console.log(`[RECENT] Available students:`, studentsInfo.map(s => `"${s.FirstName} ${s.LastName}"`));
-      
       if (selectedStudentName) {
         targetStudent = studentsInfo.find((s: any) => 
           `${s.FirstName} ${s.LastName}` === selectedStudentName
         );
-        console.log(`[RECENT] Target student found:`, targetStudent ? `${targetStudent.FirstName} ${targetStudent.LastName}` : 'NOT FOUND');
       }
 
       if (targetStudent) {
-        console.log(`Getting recent sessions for student: ${targetStudent.FirstName} ${targetStudent.LastName} (ID: ${targetStudent.ID})`);
         const studentSessions = await getSessions(targetStudent.ID);
-        console.log(`Found ${studentSessions.length} total sessions for student`);
-        
         studentSessions.forEach((session: any) => {
           if (session.category === "recent") {
             session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
@@ -189,8 +180,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             recentSessions.push(session);
           }
         });
-        
-        console.log(`Filtered to ${recentSessions.length} recent sessions`);
       } else if (!selectedStudentName) {
         // Get sessions for all students if no specific student
         for (const student of studentsInfo) {
@@ -205,7 +194,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log('[RECENT SESSIONS] Returning response with sessions:', recentSessions.length);
       res.json({
         sessions: recentSessions
       });
@@ -218,11 +206,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get upcoming sessions (from tblSessionSchedule - future dates)
   app.get("/api/sessions/upcoming", requireAuth, async (req, res) => {
     try {
-      console.log('[UPCOMING SESSIONS] API endpoint hit');
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
       const { studentId } = req.query;
-      console.log('[UPCOMING SESSIONS] studentId from query:', studentId);
       
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
@@ -236,21 +222,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedStudentName = studentId; // This is actually the student name from the frontend
       let targetStudent = null;
       
-      console.log(`[UPCOMING] Looking for student: "${selectedStudentName}"`);
-      console.log(`[UPCOMING] Available students:`, studentsInfo.map(s => `"${s.FirstName} ${s.LastName}"`));
-      
       if (selectedStudentName) {
         targetStudent = studentsInfo.find((s: any) => 
           `${s.FirstName} ${s.LastName}` === selectedStudentName
         );
-        console.log(`[UPCOMING] Target student found:`, targetStudent ? `${targetStudent.FirstName} ${targetStudent.LastName}` : 'NOT FOUND');
       }
 
       if (targetStudent) {
-        console.log(`Getting upcoming sessions for student: ${targetStudent.FirstName} ${targetStudent.LastName} (ID: ${targetStudent.ID})`);
         const studentSessions = await getSessions(targetStudent.ID);
-        console.log(`Found ${studentSessions.length} total sessions for student`);
-        
         studentSessions.forEach((session: any) => {
           if (session.category === "upcoming") {
             session.studentName = `${targetStudent.FirstName} ${targetStudent.LastName}`;
@@ -258,8 +237,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             upcomingSessions.push(session);
           }
         });
-        
-        console.log(`Filtered to ${upcomingSessions.length} upcoming sessions`);
       } else if (!selectedStudentName) {
         // Get sessions for all students if no specific student
         for (const student of studentsInfo) {
@@ -274,7 +251,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      console.log('[UPCOMING SESSIONS] Returning response with sessions:', upcomingSessions.length);
       res.json({
         sessions: upcomingSessions
       });

@@ -27,13 +27,13 @@ export default function Dashboard() {
     queryKey: ["/api/auth/me"],
   });
 
-  // Load students immediately (lightweight)
+  // 1. Load students first (immediate after login - lightweight query)
   const { data: studentsData } = useQuery({
     queryKey: ["/api/students"],
     enabled: !!user,
   });
 
-  // Load recent sessions only when needed
+  // 2a. Load recent sessions when student selected (past dates from tblSessionSchedule)
   const { data: recentSessionsData, isLoading: isLoadingRecent, error: recentError } = useQuery({
     queryKey: ["/api/sessions/recent", selectedStudent],
     queryFn: async () => {
@@ -47,7 +47,7 @@ export default function Dashboard() {
     enabled: !!user && !!selectedStudent,
   });
 
-  // Load upcoming sessions only when needed  
+  // 2b. Load upcoming sessions when student selected (future dates from tblSessionSchedule)
   const { data: upcomingSessionsData, isLoading: isLoadingUpcoming, error: upcomingError } = useQuery({
     queryKey: ["/api/sessions/upcoming", selectedStudent],
     queryFn: async () => {
@@ -61,7 +61,7 @@ export default function Dashboard() {
     enabled: !!user && !!selectedStudent,
   });
 
-  // Load billing only when billing tab is active (heaviest query - last priority)
+  // 3. Load billing last (only when billing tab active - heaviest query, lowest priority)
   const { data: billingData } = useQuery({
     queryKey: ["/api/billing"],
     enabled: !!user && activeTab === "billing",
@@ -73,13 +73,7 @@ export default function Dashboard() {
   const upcomingSessions = (upcomingSessionsData as any)?.sessions || [];
   const billing = (billingData as any)?.billing || null;
 
-  // Debug logging
-  console.log('Recent sessions data:', recentSessionsData);
-  console.log('Recent sessions array:', recentSessions);
-  console.log('Upcoming sessions data:', upcomingSessionsData);
-  console.log('Upcoming sessions array:', upcomingSessions);
-  console.log('Recent error:', recentError);
-  console.log('Upcoming error:', upcomingError);
+  // Data loading sequence: 1) Students 2) Sessions 3) Billing (tab-specific)
 
   if (!user) {
     return (

@@ -19,8 +19,11 @@ Data loading priority: Students first (immediate), sessions second (on-demand), 
 - Added franchise email lookup using SQL query: SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)
 - Email button automatically fetches franchise email when student is selected
 - Prioritized Gmail app on mobile with iframe detection, Gmail web interface on desktop, optimized for preview environments
-- Optimized login performance by splitting dashboard data into separate lazy-loaded endpoints (students, sessions, billing)
+- Optimized login performance by splitting dashboard data into separate endpoints with proper loading sequence
 - Reduced initial login time by loading only essential student data first (9ms vs 20+ seconds)
+- Implemented optimized data loading sequence: inquiry ID → students → sessions (recent & upcoming) → billing last
+- Sessions now load immediately when student is selected with separate recent/upcoming endpoints
+- Fixed session data display issues - both recent and upcoming sessions now show properly
 
 # System Architecture
 
