@@ -125,30 +125,12 @@ export async function getHoursBalance(inquiryId: number) {
       };
     } catch (procError) {
       console.log("Stored procedure error:", procError.message);
-      // Return mock data structure for development
+      // Return empty structure when stored procedure fails
       return {
-        balance: {
-          Purchases: "10.0",
-          AttendancePresent: "-5.0",
-          UnexcusedAbsences: "0.0",
-          MiscAdjustments: "0.0",
-        },
-        extra: [
-          {
-            AccountHolder: "Angie Golden",
-            StudentNames: "Sophia Golden, Benjamin Golden"
-          }
-        ],
-        account_details: [
-          { FormattedDate: "07/01/2025", Student: "Sophia Golden", EventType: "Initial Purchase", Adjustment: 10.0 },
-          { FormattedDate: "07/15/2025", Student: "Sophia Golden", EventType: "Session Attendance", Adjustment: -1.0 },
-          { FormattedDate: "07/22/2025", Student: "Benjamin Golden", EventType: "Session Attendance", Adjustment: -1.0 },
-          { FormattedDate: "07/24/2025", Student: "Benjamin Golden", EventType: "Enroll Student", Adjustment: 0.0 },
-          { FormattedDate: "08/01/2025", Student: "Sophia Golden", EventType: "Balance Adjustment", Adjustment: 2.0 },
-          { FormattedDate: "08/05/2025", Student: "Benjamin Golden", EventType: "Session Attendance", Adjustment: -1.5 },
-          { FormattedDate: "08/10/2025", Student: "Sophia Golden", EventType: "Package Purchase", Adjustment: 15.0 }
-        ],
-        remaining_hours: 5.0,
+        balance: {},
+        extra: [],
+        account_details: [],
+        remaining_hours: 0.0,
       };
     }
   } catch (error) {

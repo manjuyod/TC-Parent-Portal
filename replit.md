@@ -47,7 +47,7 @@ Data Source: `result.recordsets[3]` contains the account transaction history.
 <td>{detail.Adjustment || 0}</td>             // Adjustment column (hours +/-)
 ```
 
-**Current Issue**: Stored procedure `USP_Report_AccountBalance` is failing, so system falls back to mock data. When real procedure works, data will populate from actual database instead of hardcoded values.
+**Current Issue**: Stored procedure `USP_Report_AccountBalance` is failing, so billing data is not available. System displays "No account information available" until database connection/procedure is fixed.
 
 ## Recent Changes (August 2025)
 - Updated authentication system to use email as username and phone number as password
