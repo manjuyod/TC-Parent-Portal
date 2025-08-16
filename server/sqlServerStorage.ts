@@ -49,7 +49,7 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
 export async function getHoursBalance(inquiryId: number) {
   try {
     const request = pool.request();
-    request.input("inquiryId", sql.Int, inquiryId);
+    request.input("inqID", sql.Int, inquiryId);
 
     // Call the stored procedure - Note: this might need adjustment based on actual procedure signature
     try {
