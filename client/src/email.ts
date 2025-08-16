@@ -110,50 +110,104 @@ export function truncateEmailContent(content: string, maxLength: number = 1500):
 let navigationInProgress = false;
 
 /**
+ * Create a temporary link element to trigger email opening
+ */
+function createTempLink(href: string): HTMLAnchorElement {
+  const link = document.createElement('a');
+  link.href = href;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  return link;
+}
+
+/**
+ * Try to open an app via deep link with fallback detection
+ */
+function tryAppLink(appUrl: string, fallbackFn: () => void, timeout: number = 800): void {
+  console.log('Trying app link:', appUrl);
+  
+  let appOpened = false;
+  
+  // Create hidden iframe to try app link
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = appUrl;
+  document.body.appendChild(iframe);
+  
+  // Detect if app opened by checking if window lost focus
+  const checkFocus = () => {
+    if (document.hidden || !document.hasFocus()) {
+      appOpened = true;
+      console.log('App appears to have opened');
+    }
+  };
+  
+  // Listen for page visibility changes
+  document.addEventListener('visibilitychange', checkFocus);
+  window.addEventListener('blur', checkFocus);
+  
+  // Cleanup and fallback after timeout
+  setTimeout(() => {
+    document.removeEventListener('visibilitychange', checkFocus);
+    window.removeEventListener('blur', checkFocus);
+    document.body.removeChild(iframe);
+    
+    if (!appOpened) {
+      console.log('App did not open, using fallback');
+      fallbackFn();
+    }
+    navigationInProgress = false;
+  }, timeout);
+}
+
+/**
  * Open email with preference for Gmail app on mobile, then Gmail web, then mailto
  */
 export function openWithPreference(links: EmailLinks): void {
   if (navigationInProgress) {
+    console.log('Navigation already in progress, skipping');
     return;
   }
   
   navigationInProgress = true;
+  console.log('Opening email with links:', links);
   
   try {
     const mobile = isMobile();
+    console.log('Is mobile:', mobile);
     
     // Mobile: try Gmail app first
     if (mobile && links.gmailApp) {
-      // Try to open Gmail app
-      window.location.href = links.gmailApp;
-      
-      // Set timeout to fallback to Gmail web if app doesn't open
-      setTimeout(() => {
-        if (navigationInProgress) {
+      console.log('Trying Gmail app on mobile');
+      tryAppLink(links.gmailApp, () => {
+        // Fallback to Gmail web or mailto
+        if (links.gmailWeb) {
+          console.log('Falling back to Gmail web');
           try {
-            if (links.gmailWeb) {
-              window.open(links.gmailWeb, '_blank');
-            } else {
-              window.location.href = links.mailto;
-            }
+            window.open(links.gmailWeb, '_blank');
           } catch (error) {
-            console.warn('Fallback to mailto after Gmail app/web failed:', error);
+            console.warn('Gmail web failed, using mailto:', error);
             window.location.href = links.mailto;
           }
-          navigationInProgress = false;
+        } else {
+          console.log('No Gmail web, using mailto');
+          window.location.href = links.mailto;
         }
-      }, 700); // Conservative timeout
-      
+      });
       return;
     }
     
     // Desktop or no Gmail app: try Gmail web
     if (links.gmailWeb) {
+      console.log('Trying Gmail web');
       try {
         const newWindow = window.open(links.gmailWeb, '_blank');
         if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
           // Popup blocked, fallback to mailto
-          throw new Error('Popup blocked');
+          console.warn('Popup blocked, using mailto');
+          window.location.href = links.mailto;
+        } else {
+          console.log('Gmail web opened successfully');
         }
         navigationInProgress = false;
         return;
@@ -163,7 +217,10 @@ export function openWithPreference(links: EmailLinks): void {
     }
     
     // Final fallback: mailto
-    window.location.href = links.mailto;
+    console.log('Using mailto fallback');
+    const mailtoLink = createTempLink(links.mailto);
+    mailtoLink.click();
+    document.body.removeChild(mailtoLink);
     navigationInProgress = false;
     
   } catch (error) {
@@ -180,6 +237,8 @@ export function openEmailWithPreference(
   emailParams: EmailParams, 
   prefer: 'auto' | 'gmail' | 'mailto' | 'outlook' = 'auto'
 ): void {
+  console.log('Opening email with preference:', prefer, emailParams);
+  
   // Ensure content is within limits
   const truncatedParams = {
     ...emailParams,
@@ -196,12 +255,15 @@ export function openEmailWithPreference(
     outlook: buildOutlookWebCompose(truncatedParams)
   };
   
+  console.log('Generated email links:', links);
+  
   switch (prefer) {
     case 'auto':
       openWithPreference(links);
       break;
       
     case 'gmail':
+      console.log('Using Gmail preference');
       try {
         if (links.gmailWeb) {
           const newWindow = window.open(links.gmailWeb, '_blank');
@@ -213,11 +275,14 @@ export function openEmailWithPreference(
         }
       } catch (error) {
         console.warn('Gmail failed, falling back to mailto:', error);
-        window.location.href = links.mailto;
+        const mailtoLink = createTempLink(links.mailto);
+        mailtoLink.click();
+        document.body.removeChild(mailtoLink);
       }
       break;
       
     case 'outlook':
+      console.log('Using Outlook preference');
       try {
         if (links.outlook) {
           const newWindow = window.open(links.outlook, '_blank');
@@ -229,13 +294,18 @@ export function openEmailWithPreference(
         }
       } catch (error) {
         console.warn('Outlook failed, falling back to mailto:', error);
-        window.location.href = links.mailto;
+        const mailtoLink = createTempLink(links.mailto);
+        mailtoLink.click();
+        document.body.removeChild(mailtoLink);
       }
       break;
       
     case 'mailto':
     default:
-      window.location.href = links.mailto;
+      console.log('Using mailto');
+      const mailtoLink = createTempLink(links.mailto);
+      mailtoLink.click();
+      document.body.removeChild(mailtoLink);
       break;
   }
 }

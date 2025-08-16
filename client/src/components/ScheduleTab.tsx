@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { CalendarX, Edit } from "lucide-react";
 import EmailButton, { type ScheduleChangeDetails } from "./EmailButton";
+import { EmailTestButton } from "./EmailTestButton";
 
 interface ScheduleTabProps {
   data: any;
@@ -139,6 +140,7 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
         </CardHeader>
         
         <CardContent className="p-6">
+          <EmailTestButton />
           <div className="space-y-6">
             <div>
               <Label htmlFor="student_select" className="block text-sm font-semibold text-text-dark mb-2">

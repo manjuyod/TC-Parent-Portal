@@ -104,16 +104,27 @@ export function EmailButton({
     return lines.join('\r\n');
   };
 
-  const handleEmailCompose = async () => {
-    if (disabled || isLoading) return;
+  const handleEmailCompose = async (event: React.MouseEvent) => {
+    // Prevent any default button behavior
+    event.preventDefault();
+    event.stopPropagation();
+    
+    console.log('EmailButton clicked, isLoading:', isLoading, 'disabled:', disabled);
+    
+    if (disabled || isLoading) {
+      console.log('Button disabled or loading, returning early');
+      return;
+    }
 
     // Fetch email if not already loaded
     if (!centerEmail) {
+      console.log('No center email, fetching...');
       await fetchCenterEmail();
       return; // Let the useEffect trigger another render
     }
 
     if (!centerEmail || !validateEmail(centerEmail)) {
+      console.error('Invalid email address:', centerEmail);
       toast({
         title: "Invalid Email Address",
         description: "The center email address is missing or invalid. Please contact your tutoring center directly.",
@@ -128,6 +139,8 @@ export function EmailButton({
       const subject = `Schedule Change – ${studentName}`;
       const body = buildEmailBody();
       
+      console.log('Email params:', { to: centerEmail, subject, body });
+      
       const emailParams = {
         to: centerEmail,
         subject,
@@ -137,6 +150,7 @@ export function EmailButton({
       // Check URI length to prevent issues
       const testMailto = `mailto:${centerEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       if (testMailto.length > 2000) {
+        console.warn('Email content too long:', testMailto.length);
         toast({
           title: "Message Too Long",
           description: "The message content is too long. Please shorten your reason or notes.",
@@ -145,6 +159,7 @@ export function EmailButton({
         return;
       }
 
+      console.log('Opening email with preference:', prefer);
       openEmailWithPreference(emailParams, prefer);
       
       toast({
