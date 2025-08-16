@@ -33,10 +33,16 @@ export default function Dashboard() {
     enabled: !!user,
   });
 
-  // Load sessions only when needed (on schedule tab or student selection)
-  const { data: sessionsData } = useQuery({
-    queryKey: ["/api/sessions", selectedStudent],
-    enabled: !!user && ((activeTab === "home" && !!selectedStudent) || activeTab === "schedule"),
+  // Load recent sessions only when needed
+  const { data: recentSessionsData } = useQuery({
+    queryKey: ["/api/sessions/recent", selectedStudent],
+    enabled: !!user && !!selectedStudent,
+  });
+
+  // Load upcoming sessions only when needed  
+  const { data: upcomingSessionsData } = useQuery({
+    queryKey: ["/api/sessions/upcoming", selectedStudent],
+    enabled: !!user && !!selectedStudent,
   });
 
   // Load billing only when billing tab is active (heaviest query - last priority)
@@ -47,7 +53,8 @@ export default function Dashboard() {
 
   // Extract typed data with fallbacks
   const students = (studentsData as any)?.students || [];
-  const sessions = (sessionsData as any)?.sessions || [];
+  const recentSessions = (recentSessionsData as any)?.sessions || [];
+  const upcomingSessions = (upcomingSessionsData as any)?.sessions || [];
   const billing = (billingData as any)?.billing || null;
 
   if (!user) {
@@ -79,13 +86,7 @@ export default function Dashboard() {
 
   const user_data = (user as any)?.parent;
 
-  // Filter sessions based on selected student
-  const filteredSessions =
-    selectedStudent && sessions
-      ? sessions.filter(
-          (session: any) => session.studentName === selectedStudent,
-        )
-      : [];
+  // Sessions are already filtered by student in the API calls
 
   const handleLogout = async () => {
     try {
@@ -205,12 +206,12 @@ export default function Dashboard() {
           <h3 style={{ marginBottom: "30px" }}>Schedule Management</h3>
 
           {/* Current Schedule */}
-          {filteredSessions && filteredSessions.length > 0 ? (
+          {(recentSessions.length > 0 || upcomingSessions.length > 0) ? (
             <div className="card mb-4">
               <div className="card-header">
                 <h5 style={{ color: "white", margin: 0 }}>
                   Current Schedule for {selectedStudent} (
-                  {filteredSessions.length} sessions)
+                  {recentSessions.length + upcomingSessions.length} sessions)
                 </h5>
               </div>
               <div className="card-body">
@@ -225,7 +226,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredSessions.map((session: any, index: number) => (
+                      {[...recentSessions, ...upcomingSessions].map((session: any, index: number) => (
                         <tr key={index}>
                           <td>{session.Day || "N/A"}</td>
                           <td>{session.Time || "N/A"}</td>
@@ -777,14 +778,12 @@ export default function Dashboard() {
                 </h6>
               </div>
               <div className="card-body">
-                {selectedStudent &&
-                filteredSessions &&
-                filteredSessions.length > 0 ? (
+                {selectedStudent && recentSessions && recentSessions.length > 0 ? (
                   <div
                     className="timeline-container"
                     style={{ maxHeight: "300px", overflowY: "auto" }}
                   >
-                    {filteredSessions
+                    {recentSessions
                       .slice(0, 5)
                       .map((session: any, index: number) => (
                         <div
@@ -849,10 +848,8 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  {selectedStudent &&
-                  filteredSessions &&
-                  filteredSessions.length > 0 ? (
-                    filteredSessions
+                  {selectedStudent && upcomingSessions && upcomingSessions.length > 0 ? (
+                    upcomingSessions
                       .slice(0, 4)
                       .map((session: any, index: number) => (
                         <div

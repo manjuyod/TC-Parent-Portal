@@ -146,8 +146,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get sessions (load on demand)
-  app.get("/api/sessions", requireAuth, async (req, res) => {
+  // Get recent sessions (from tblSessionSchedule - past dates)
+  app.get("/api/sessions/recent", requireAuth, async (req, res) => {
     try {
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
@@ -159,7 +159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const studentsInfo = inquiryData.students;
-      const allSessions: any[] = [];
+      const recentSessions: any[] = [];
 
       // If specific student requested, get only their sessions
       if (studentId) {
@@ -167,28 +167,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (student) {
           const studentSessions = await getSessions(student.ID);
           studentSessions.forEach((session: any) => {
-            session.studentName = `${student.FirstName} ${student.LastName}`;
-            session.studentId = student.ID;
+            if (session.category === "recent") {
+              session.studentName = `${student.FirstName} ${student.LastName}`;
+              session.studentId = student.ID;
+              recentSessions.push(session);
+            }
           });
-          allSessions.push(...studentSessions);
         }
       } else {
         // Get sessions for all students
         for (const student of studentsInfo) {
           const studentSessions = await getSessions(student.ID);
           studentSessions.forEach((session: any) => {
-            session.studentName = `${student.FirstName} ${student.LastName}`;
-            session.studentId = student.ID;
+            if (session.category === "recent") {
+              session.studentName = `${student.FirstName} ${student.LastName}`;
+              session.studentId = student.ID;
+              recentSessions.push(session);
+            }
           });
-          allSessions.push(...studentSessions);
         }
       }
 
       res.json({
-        sessions: allSessions
+        sessions: recentSessions
       });
     } catch (error) {
-      console.error('Sessions error:', error);
+      console.error('Recent sessions error:', error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get upcoming sessions (from tblSessionSchedule - future dates)
+  app.get("/api/sessions/upcoming", requireAuth, async (req, res) => {
+    try {
+      const contactPhone = req.session.contactPhone!;
+      const email = req.session.email!;
+      const { studentId } = req.query;
+      
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
+      if (!inquiryData) {
+        return res.status(404).json({ message: "Parent data not found" });
+      }
+
+      const studentsInfo = inquiryData.students;
+      const upcomingSessions: any[] = [];
+
+      // If specific student requested, get only their sessions
+      if (studentId) {
+        const student = studentsInfo.find((s: any) => s.ID.toString() === studentId);
+        if (student) {
+          const studentSessions = await getSessions(student.ID);
+          studentSessions.forEach((session: any) => {
+            if (session.category === "upcoming") {
+              session.studentName = `${student.FirstName} ${student.LastName}`;
+              session.studentId = student.ID;
+              upcomingSessions.push(session);
+            }
+          });
+        }
+      } else {
+        // Get sessions for all students
+        for (const student of studentsInfo) {
+          const studentSessions = await getSessions(student.ID);
+          studentSessions.forEach((session: any) => {
+            if (session.category === "upcoming") {
+              session.studentName = `${student.FirstName} ${student.LastName}`;
+              session.studentId = student.ID;
+              upcomingSessions.push(session);
+            }
+          });
+        }
+      }
+
+      res.json({
+        sessions: upcomingSessions
+      });
+    } catch (error) {
+      console.error('Upcoming sessions error:', error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
