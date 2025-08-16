@@ -12,6 +12,43 @@ Data loading priority: Students first (immediate), sessions second (on-demand), 
 ## Important Notes
 - **Account Balance Definition**: In this system, "account balance" refers to remaining tutoring hours, NOT monetary amounts. The billing system tracks hours purchased/used, not dollar balances.
 
+## Billing System Data Structure
+The billing tab displays data from the stored procedure `USP_Report_AccountBalance` which returns 4 result sets:
+
+### Account Balance Report Table
+- **Account Holder**: `result.recordsets[2][0].AccountHolder` - Parent/guardian name
+- **Students**: `result.recordsets[2][0].StudentNames` - Comma-separated student names  
+- **Hours Remaining**: Calculated from `result.recordsets[1][0]` fields:
+  - `Purchases` + `AttendancePresent` + `UnexcusedAbsences` + `MiscAdjustments`
+
+### Account Details Table  
+- **Date**: `FormattedDate` - Transaction date (MM/DD/YYYY format)
+- **Student**: `Student` - Which student the transaction applies to
+- **Event Type**: `EventType` - Type of transaction (Session Attendance, Initial Purchase, etc.)
+- **Adjustment**: `Adjustment` - Hour change (+/- decimal values, positive = hours added, negative = hours used)
+
+Data Source: `result.recordsets[3]` contains the account transaction history.
+
+### Frontend Mapping (dashboard.tsx)
+**Account Balance Report Table:**
+```typescript
+// Lines 545-553: Maps billing.extra[0] data
+<td>{account.AccountHolder || "N/A"}</td>
+<td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
+<td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
+```
+
+**Account Details Table:**  
+```typescript
+// Lines 606-617: Maps billing.account_details array
+<td>{detail.FormattedDate || "N/A"}</td>      // Date column
+<td>{detail.Student || "N/A"}</td>            // Student column  
+<td>{detail.EventType || "N/A"}</td>          // Event Type column
+<td>{detail.Adjustment || 0}</td>             // Adjustment column (hours +/-)
+```
+
+**Current Issue**: Stored procedure `USP_Report_AccountBalance` is failing, so system falls back to mock data. When real procedure works, data will populate from actual database instead of hardcoded values.
+
 ## Recent Changes (August 2025)
 - Updated authentication system to use email as username and phone number as password
 - Connected to existing SQL Server database using legacy table structure (tblInquiry, tblstudents, tblSessionSchedule)
