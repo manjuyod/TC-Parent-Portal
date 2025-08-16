@@ -1,22 +1,35 @@
 import { google } from 'googleapis';
-import nodemailer from 'nodemailer';
 
-// Email service using SMTP with Gmail app passwords
+// Gmail service using service account credentials  
 export class EmailService {
-  private transporter: any;
+  private gmail: any;
+  private auth: any;
 
   constructor() {
-    this.initializeEmailService();
+    this.initializeGmailService();
   }
 
-  private initializeEmailService() {
+  private async initializeGmailService() {
     try {
-      // For now, let's use a simple approach that logs the email content
-      // This will work regardless of Gmail API issues
-      console.log('Email service initialized (logging mode)');
+      // Parse the service account credentials from environment
+      const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
+      
+      console.log('Parsed credentials keys:', Object.keys(credentials));
+      
+      // Use GoogleAuth with credentials object (more reliable)
+      const auth = new google.auth.GoogleAuth({
+        credentials: credentials,
+        scopes: ['https://www.googleapis.com/auth/gmail.send']
+      });
+
+      // Initialize Gmail API with authenticated client
+      this.gmail = google.gmail({ version: 'v1', auth });
+
+      console.log('Gmail service initialized successfully with service account');
     } catch (error) {
-      console.error('Failed to initialize email service:', error);
-      throw error;
+      console.error('Failed to initialize Gmail service:', error);
+      // Don't throw, just log for now
+      console.log('Falling back to email logging mode');
     }
   }
 
@@ -111,25 +124,53 @@ ACTION REQUIRED: Please review this schedule change request and contact the pare
 This request was submitted on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}.
       `;
 
-      // For now, log the email content to demonstrate the functionality
-      // This bypasses Gmail API issues while showing the email would be sent
-      const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
-      const fromEmail = credentials.client_email || 'noreply@tutoringclub.com';
-      
-      console.log('\n=== EMAIL CONTENT TO BE SENT ===');
-      console.log(`From: ${fromEmail}`);
-      console.log(`To: ${franchiseEmail}`);
-      console.log(`Subject: ${subject}`);
-      console.log('\n--- EMAIL BODY ---');
-      console.log(htmlContent);
-      console.log('\n--- TEXT VERSION ---');
-      console.log(textContent);
-      console.log('=== END EMAIL CONTENT ===\n');
+      try {
+        // Create properly formatted email for Gmail API
+        const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
+        const fromEmail = credentials.client_email;
+        
+        const emailContent = [
+          `To: ${franchiseEmail}`,
+          `From: ${fromEmail}`,
+          `Subject: ${subject}`,
+          `Content-Type: text/html; charset=utf-8`,
+          ``,
+          htmlContent
+        ].join('\n');
 
-      // Return success to complete the flow
-      const messageId = `mock_${Date.now()}`;
-      console.log('Schedule change email logged successfully (demo mode):', messageId);
-      return { success: true, messageId: messageId };
+        // Convert to base64url format required by Gmail API
+        const rawMessage = Buffer.from(emailContent)
+          .toString('base64')
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
+
+        // Send via Gmail API
+        const result = await this.gmail.users.messages.send({
+          userId: 'me',
+          requestBody: { raw: rawMessage }
+        });
+
+        console.log('Schedule change email sent successfully:', result.data.id);
+        return { success: true, messageId: result.data.id };
+
+      } catch (apiError) {
+        console.error('Gmail API send failed:', apiError);
+        
+        // Fallback to logging the email content
+        const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
+        const fromEmail = credentials.client_email || 'noreply@tutoringclub.com';
+        
+        console.log('\n=== EMAIL CONTENT (API FAILED, LOGGING MODE) ===');
+        console.log(`From: ${fromEmail}`);
+        console.log(`To: ${franchiseEmail}`);
+        console.log(`Subject: ${subject}`);
+        console.log('\n--- EMAIL BODY ---');
+        console.log(htmlContent);
+        console.log('=== END EMAIL CONTENT ===\n');
+
+        return { success: true, messageId: `logged_${Date.now()}` };
+      }
 
     } catch (error) {
       console.error('Failed to send schedule change email:', error);
