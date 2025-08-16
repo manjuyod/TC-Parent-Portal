@@ -46,6 +46,32 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
   }
 }
 
+export async function getFranchiseEmail(inquiryId: number): Promise<string | null> {
+  try {
+    const query = `
+      SELECT FranchiesEmail 
+      FROM tblFranchies 
+      WHERE ID = (
+        SELECT FranchiesId 
+        FROM tblinquiry 
+        WHERE ID = @inquiryId
+      )
+    `;
+
+    const request = pool.request();
+    request.input("inquiryId", sql.Int, inquiryId);
+    const result = await request.query(query);
+
+    if (result.recordset.length > 0) {
+      return result.recordset[0].FranchiesEmail;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting franchise email:", error);
+    throw error;
+  }
+}
+
 export async function getHoursBalance(inquiryId: number) {
   try {
     const request = pool.request();

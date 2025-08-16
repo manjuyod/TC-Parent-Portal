@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest } from "./sqlServerStorage";
+import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest, getFranchiseEmail } from "./sqlServerStorage";
+import { emailService } from "./emailService";
 import { loginSchema } from "@shared/schema";
 import session from "express-session";
 
@@ -185,14 +186,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Submit schedule change request
   app.post("/api/schedule-change-request", requireAuth, async (req, res) => {
     try {
-      const { studentId, currentSession, preferredDate, preferredTime, requestedChange, reason } = req.body;
+      const { studentId, currentSession, preferredDate, preferredTime, requestedChange, reason, additionalNotes } = req.body;
       const studentIds = req.session.studentIds || [];
+      const inquiryId = req.session.inquiryId!;
+      const email = req.session.email!;
+      const contactPhone = req.session.contactPhone!;
       
       // Verify the student belongs to the authenticated parent
       if (!studentIds.includes(parseInt(studentId))) {
         return res.status(403).json({ message: "Unauthorized access to student" });
       }
 
+      // Get parent and student information for email
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
+      if (!inquiryData) {
+        return res.status(404).json({ message: "Parent data not found" });
+      }
+
+      const student = inquiryData.students.find((s: any) => s.ID === parseInt(studentId));
+      if (!student) {
+        return res.status(404).json({ message: "Student not found" });
+      }
+
+      // Get franchise email
+      const franchiseEmail = await getFranchiseEmail(inquiryId);
+      if (!franchiseEmail) {
+        return res.status(404).json({ message: "Franchise email not found" });
+      }
+
+      // Submit the schedule change request (existing functionality)
       const result = await submitScheduleChangeRequest({
         studentId: parseInt(studentId),
         currentSession,
@@ -205,11 +227,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (result.error) {
         return res.status(400).json({ message: result.error });
       }
+
+      // Send email notification to franchise
+      try {
+        const emailResult = await emailService.sendScheduleChangeRequest(
+          franchiseEmail,
+          {
+            name: inquiryData.inquiry.FirstName + ' ' + inquiryData.inquiry.LastName,
+            email: email,
+            phone: contactPhone
+          },
+          {
+            name: student.FirstName + ' ' + student.LastName,
+            id: student.ID
+          },
+          {
+            currentSchedule: currentSession,
+            requestedChange: requestedChange,
+            reason: reason,
+            effectiveDate: preferredDate,
+            additionalNotes: additionalNotes || null
+          }
+        );
+
+        console.log('Schedule change email sent successfully:', emailResult.messageId);
+      } catch (emailError) {
+        console.error('Failed to send schedule change email:', emailError);
+        // Don't fail the request if email fails, but log it
+      }
       
-      res.json(result);
+      res.json({ 
+        ...result, 
+        emailSent: true,
+        franchiseEmail: franchiseEmail
+      });
     } catch (error) {
       console.error('Schedule change request error:', error);
-      res.status(400).json({ message: "Invalid request data" });
+      res.status(500).json({ message: "Internal server error" });
     }
   });
 

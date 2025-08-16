@@ -9,6 +9,17 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("home");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [scheduleForm, setScheduleForm] = useState({
+    studentId: "",
+    currentSession: "",
+    preferredDate: "",
+    preferredTime: "",
+    requestedChange: "",
+    reason: "",
+    additionalNotes: ""
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
 
   const { data: user } = useQuery({
     queryKey: ["/api/auth/me"],
@@ -62,6 +73,44 @@ export default function Dashboard() {
   };
 
   const totalPages = billing?.account_details ? Math.ceil(billing.account_details.length / itemsPerPage) : 1;
+
+  const handleScheduleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setSubmitMessage("");
+
+    try {
+      const response = await fetch("/api/schedule-change-request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(scheduleForm),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setSubmitMessage("Schedule change request submitted successfully! The franchise has been notified via email.");
+        setScheduleForm({
+          studentId: "",
+          currentSession: "",
+          preferredDate: "",
+          preferredTime: "",
+          requestedChange: "",
+          reason: "",
+          additionalNotes: ""
+        });
+      } else {
+        setSubmitMessage(`Error: ${result.message}`);
+      }
+    } catch (error) {
+      setSubmitMessage("Error submitting request. Please try again.");
+      console.error("Submit error:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (activeTab === "schedule") {
     return (
@@ -187,16 +236,28 @@ export default function Dashboard() {
               <h5>Request Schedule Change</h5>
             </div>
             <div className="card-body">
-              <form>
+              {submitMessage && (
+                <div className={`alert ${submitMessage.includes('Error') ? 'alert-danger' : 'alert-success'} mb-3`}>
+                  {submitMessage}
+                </div>
+              )}
+              
+              <form onSubmit={handleScheduleFormSubmit}>
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label htmlFor="student_name" className="form-label">
                       Student Name
                     </label>
-                    <select className="form-control" id="student_name" required>
+                    <select 
+                      className="form-control" 
+                      id="student_name" 
+                      value={scheduleForm.studentId}
+                      onChange={(e) => setScheduleForm({...scheduleForm, studentId: e.target.value})}
+                      required
+                    >
                       <option value="">Select a student</option>
                       {students.map((student: any) => (
-                        <option key={student.id} value={student.name}>
+                        <option key={student.id} value={student.id}>
                           {student.name}
                         </option>
                       ))}
@@ -211,6 +272,8 @@ export default function Dashboard() {
                       className="form-control"
                       id="current_session"
                       placeholder="e.g., Monday 3:00 PM"
+                      value={scheduleForm.currentSession}
+                      onChange={(e) => setScheduleForm({...scheduleForm, currentSession: e.target.value})}
                       required
                     />
                   </div>
@@ -224,6 +287,8 @@ export default function Dashboard() {
                       type="date"
                       className="form-control"
                       id="preferred_date"
+                      value={scheduleForm.preferredDate}
+                      onChange={(e) => setScheduleForm({...scheduleForm, preferredDate: e.target.value})}
                       required
                     />
                   </div>
@@ -235,6 +300,8 @@ export default function Dashboard() {
                       type="time"
                       className="form-control"
                       id="preferred_time"
+                      value={scheduleForm.preferredTime}
+                      onChange={(e) => setScheduleForm({...scheduleForm, preferredTime: e.target.value})}
                       required
                     />
                   </div>
@@ -248,6 +315,8 @@ export default function Dashboard() {
                     id="requested_change"
                     rows={3}
                     placeholder="Describe what changes you would like to make"
+                    value={scheduleForm.requestedChange}
+                    onChange={(e) => setScheduleForm({...scheduleForm, requestedChange: e.target.value})}
                     required
                   ></textarea>
                 </div>
@@ -260,10 +329,29 @@ export default function Dashboard() {
                     id="reason"
                     rows={3}
                     placeholder="Please explain why you need this schedule change"
+                    value={scheduleForm.reason}
+                    onChange={(e) => setScheduleForm({...scheduleForm, reason: e.target.value})}
                   ></textarea>
                 </div>
-                <button type="submit" className="btn btn-success">
-                  Submit Schedule Change Request
+                <div className="mb-3">
+                  <label htmlFor="additional_notes" className="form-label">
+                    Additional Notes (Optional)
+                  </label>
+                  <textarea
+                    className="form-control"
+                    id="additional_notes"
+                    rows={2}
+                    placeholder="Any additional information you'd like to share"
+                    value={scheduleForm.additionalNotes}
+                    onChange={(e) => setScheduleForm({...scheduleForm, additionalNotes: e.target.value})}
+                  ></textarea>
+                </div>
+                <button 
+                  type="submit" 
+                  className="btn btn-success"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Submitting...' : 'Submit Schedule Change Request'}
                 </button>
               </form>
             </div>
