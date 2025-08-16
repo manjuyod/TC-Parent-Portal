@@ -36,12 +36,28 @@ export default function Dashboard() {
   // Load recent sessions only when needed
   const { data: recentSessionsData, isLoading: isLoadingRecent, error: recentError } = useQuery({
     queryKey: ["/api/sessions/recent", selectedStudent],
+    queryFn: async () => {
+      const params = selectedStudent ? `?studentId=${encodeURIComponent(selectedStudent)}` : '';
+      const response = await fetch(`/api/sessions/recent${params}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return response.json();
+    },
     enabled: !!user && !!selectedStudent,
   });
 
   // Load upcoming sessions only when needed  
   const { data: upcomingSessionsData, isLoading: isLoadingUpcoming, error: upcomingError } = useQuery({
     queryKey: ["/api/sessions/upcoming", selectedStudent],
+    queryFn: async () => {
+      const params = selectedStudent ? `?studentId=${encodeURIComponent(selectedStudent)}` : '';
+      const response = await fetch(`/api/sessions/upcoming${params}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return response.json();
+    },
     enabled: !!user && !!selectedStudent,
   });
 
@@ -56,6 +72,14 @@ export default function Dashboard() {
   const recentSessions = (recentSessionsData as any)?.sessions || [];
   const upcomingSessions = (upcomingSessionsData as any)?.sessions || [];
   const billing = (billingData as any)?.billing || null;
+
+  // Debug logging
+  console.log('Recent sessions data:', recentSessionsData);
+  console.log('Recent sessions array:', recentSessions);
+  console.log('Upcoming sessions data:', upcomingSessionsData);
+  console.log('Upcoming sessions array:', upcomingSessions);
+  console.log('Recent error:', recentError);
+  console.log('Upcoming error:', upcomingError);
 
   if (!user) {
     return (
