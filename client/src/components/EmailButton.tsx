@@ -36,47 +36,29 @@ export default function EmailButton({
     
     const body = bodyLines.join('\r\n');
     
+    // Simplified approach that works better in preview environments
+    // Try Gmail app first, then fallback to Gmail web
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
-    // Priority: Gmail app -> Gmail web -> Default email client
     if (isMobile) {
-      // On mobile, try Gmail app first with proper URL scheme
+      // On mobile: Try Gmail app, then Gmail web, then default
       const gmailAppLink = `googlegmail://co?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       
-      // Use a more reliable method to detect if app opens
-      let appOpened = false;
-      const startTime = Date.now();
+      // Create a hidden iframe to test app availability
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = gmailAppLink;
+      document.body.appendChild(iframe);
       
-      const tryGmailApp = () => {
-        window.location.href = gmailAppLink;
-        
-        // Check if user is still on page after short delay (indicates app didn't open)
-        setTimeout(() => {
-          if (!appOpened && (Date.now() - startTime) < 2000) {
-            // Gmail app didn't open, try Gmail web
-            const gmailWebLink = buildGmailCompose({ to, subject, body });
-            window.open(gmailWebLink, '_blank');
-          }
-        }, 500);
-      };
-      
-      // Detect when user leaves/returns to detect app opening
-      const handleVisibilityChange = () => {
-        if (document.hidden) {
-          appOpened = true;
-        }
-      };
-      
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      tryGmailApp();
-      
-      // Clean up event listener
+      // Clean up iframe and fallback to Gmail web after short delay
       setTimeout(() => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      }, 3000);
+        document.body.removeChild(iframe);
+        const gmailWebLink = buildGmailCompose({ to, subject, body });
+        window.open(gmailWebLink, '_blank');
+      }, 1000);
       
     } else {
-      // On desktop, prefer Gmail web interface
+      // On desktop: Gmail web interface works best
       const gmailWebLink = buildGmailCompose({ to, subject, body });
       window.open(gmailWebLink, '_blank');
     }

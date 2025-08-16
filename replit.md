@@ -17,7 +17,7 @@ Preferred communication style: Simple, everyday language.
 - Removed server-side email submission, replaced with EmailButton component that opens user's email client
 - Added franchise email lookup using SQL query: SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)
 - Email button automatically fetches franchise email when student is selected
-- Prioritized Gmail app first (mobile and desktop), then Gmail web interface, with mailto fallback
+- Prioritized Gmail app on mobile with iframe detection, Gmail web interface on desktop, optimized for preview environments
 
 # System Architecture
 
