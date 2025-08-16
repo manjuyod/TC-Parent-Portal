@@ -2,12 +2,15 @@
 
 This is a Tutoring Club Parent Portal - a full-stack TypeScript web application that allows parents to view their children's tutoring information, manage schedules, and handle billing. The application is built as a modern monorepo with a React frontend, Express.js backend, and shared schema definitions.
 
-The portal provides functionality for parent authentication using email and phone number credentials, student overview with progress tracking, session scheduling and change requests, and billing management. The system was migrated from a legacy Flask/SQL Server application to a modern TypeScript stack while maintaining connection to the existing SQL Server database.
+The portal provides functionality for parent authentication using email and phone number credentials, student overview with progress tracking, session scheduling and change requests, and billing management (hours-based account balance tracking). The system was migrated from a legacy Flask/SQL Server application to a modern TypeScript stack while maintaining connection to the existing SQL Server database.
 
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
 Data loading priority: Students first (immediate), sessions second (on-demand), billing last (tab-specific only).
+
+## Important Notes
+- **Account Balance Definition**: In this system, "account balance" refers to remaining tutoring hours, NOT monetary amounts. The billing system tracks hours purchased/used, not dollar balances.
 
 ## Recent Changes (August 2025)
 - Updated authentication system to use email as username and phone number as password
@@ -25,7 +28,7 @@ Data loading priority: Students first (immediate), sessions second (on-demand), 
 - Sessions now load immediately when student is selected with separate recent/upcoming endpoints
 - Fixed session data display issues - both recent and upcoming sessions now show properly
 - Added aggressive caching strategy: prefetch all student sessions data immediately after students load
-- Account balance now shows immediately on login instead of only on billing tab
+- Account balance (hours remaining) now shows immediately on login instead of only on billing tab
 - All session data cached for 2-5 minutes to eliminate reload delays when switching between students
 - React Query cache configuration optimized for instant student switching with prefetched data
 

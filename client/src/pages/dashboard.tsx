@@ -795,22 +795,17 @@ export default function Dashboard() {
               <div className="card-body d-flex justify-content-between align-items-start">
                 <div>
                   <p className="text-muted mb-1 small text-uppercase">
-                    Account Balance
+                    Account Balance (Hours)
                   </p>
                   <h4
                     className="mb-1"
                     style={{ color: "var(--tutoring-blue)" }}
                   >
-                    ${billing?.accountBalance || "0.00"}
+                    {billing?.remaining_hours?.toFixed(1) || "0.0"} hours
                   </h4>
                   <p className="text-muted small mb-0">
-                    {billing?.accountBalance > 0 ? "Amount due" : "Paid in full"} - Click for details
+                    Hours remaining - Click for billing details
                   </p>
-                  {billing?.remaining_hours && (
-                    <p className="text-muted small mb-0">
-                      {billing.remaining_hours.toFixed(1)} hours remaining
-                    </p>
-                  )}
                 </div>
                 <div className="text-end">
                   <i
