@@ -165,10 +165,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedStudentName = studentId; // This is actually the student name from the frontend
       let targetStudent = null;
       
+      console.log(`[RECENT] Looking for student: "${selectedStudentName}"`);
+      console.log(`[RECENT] Available students:`, studentsInfo.map(s => `"${s.FirstName} ${s.LastName}"`));
+      
       if (selectedStudentName) {
         targetStudent = studentsInfo.find((s: any) => 
           `${s.FirstName} ${s.LastName}` === selectedStudentName
         );
+        console.log(`[RECENT] Target student found:`, targetStudent ? `${targetStudent.FirstName} ${targetStudent.LastName}` : 'NOT FOUND');
       }
 
       if (targetStudent) {
@@ -227,10 +231,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const selectedStudentName = studentId; // This is actually the student name from the frontend
       let targetStudent = null;
       
+      console.log(`[UPCOMING] Looking for student: "${selectedStudentName}"`);
+      console.log(`[UPCOMING] Available students:`, studentsInfo.map(s => `"${s.FirstName} ${s.LastName}"`));
+      
       if (selectedStudentName) {
         targetStudent = studentsInfo.find((s: any) => 
           `${s.FirstName} ${s.LastName}` === selectedStudentName
         );
+        console.log(`[UPCOMING] Target student found:`, targetStudent ? `${targetStudent.FirstName} ${targetStudent.LastName}` : 'NOT FOUND');
       }
 
       if (targetStudent) {
