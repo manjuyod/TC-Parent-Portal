@@ -95,6 +95,7 @@ export const insertTransactionSchema = createInsertSchema(transactions).omit({
 
 // Login schema
 export const loginSchema = z.object({
+  email: z.string().email("Valid email is required"),
   contactPhone: z.string().min(10, "Please enter a valid phone number"),
 });
 

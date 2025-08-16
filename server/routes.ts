@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { findInquiryByContactPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest } from "./sqlServerStorage";
+import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest } from "./sqlServerStorage";
 import { loginSchema } from "@shared/schema";
 import session from "express-session";
 
@@ -8,6 +8,7 @@ declare module "express-session" {
   interface SessionData {
     parentId?: string;
     inquiryId?: number;
+    email?: string;
     contactPhone?: string;
     studentIds?: number[];
   }
@@ -36,9 +37,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Login endpoint
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { contactPhone } = loginSchema.parse(req.body);
+      const { email, contactPhone } = loginSchema.parse(req.body);
       
-      const inquiryData = await findInquiryByContactPhone(contactPhone);
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
         return res.status(401).json({ message: "Invalid phone number. Please contact your tutoring center." });
       }
@@ -47,6 +48,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const studentsInfo = inquiryData.students;
 
       // Store session data
+      req.session.email = email;
       req.session.contactPhone = contactPhone;
       req.session.inquiryId = parentInfo.InquiryID;
       req.session.parentId = parentInfo.InquiryID.toString();
@@ -81,9 +83,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/me", requireAuth, async (req, res) => {
     try {
       const contactPhone = req.session.contactPhone!;
+      const email = req.session.email!;
       const studentIds = req.session.studentIds || [];
       
-      const inquiryData = await findInquiryByContactPhone(contactPhone);
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
         return res.status(404).json({ message: "Parent not found" });
       }
@@ -118,9 +121,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const inquiryId = req.session.inquiryId!;
       const studentIds = req.session.studentIds || [];
       const contactPhone = req.session.contactPhone!;
+      const email = req.session.email!;
       
       // Get parent and student info
-      const inquiryData = await findInquiryByContactPhone(contactPhone);
+      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
         return res.status(404).json({ message: "Parent data not found" });
       }

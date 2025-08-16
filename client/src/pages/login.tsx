@@ -7,14 +7,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import logoPath from "@assets/logo_1755332058201.webp";
 
 export default function Login() {
+  const [email, setEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
   const loginMutation = useMutation({
-    mutationFn: async (data: { contactPhone: string }) => {
+    mutationFn: async (data: { email: string; contactPhone: string }) => {
       const response = await apiRequest("POST", "/api/auth/login", data);
       return response.json();
     },
@@ -32,7 +34,7 @@ export default function Login() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loginMutation.mutate({ contactPhone });
+    loginMutation.mutate({ email, contactPhone });
   };
 
   return (
@@ -40,7 +42,7 @@ export default function Login() {
       <Card className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
         <CardHeader className="bg-cream p-8 text-center">
           <img 
-            src="https://images.unsplash.com/photo-1606761568499-6d2451b23c66?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&h=80" 
+            src={logoPath} 
             alt="Tutoring Club Logo" 
             className="h-16 w-auto mx-auto mb-4"
           />
@@ -50,14 +52,29 @@ export default function Login() {
         <CardContent className="p-8">
           <div className="bg-gray-50 rounded-lg p-4 mb-6 text-center">
             <p className="text-sm text-text-light">
-              Enter your contact phone number to access your student information
+              Enter your email and phone number to access your student information
             </p>
           </div>
           
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
+              <Label htmlFor="email" className="block text-sm font-semibold text-text-dark mb-2">
+                Email Address (Username)
+              </Label>
+              <Input
+                type="email"
+                id="email"
+                placeholder="your.email@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-tutoring-blue focus:outline-none transition-colors"
+              />
+            </div>
+            
+            <div>
               <Label htmlFor="contact_number" className="block text-sm font-semibold text-text-dark mb-2">
-                Contact Phone Number
+                Phone Number (Password)
               </Label>
               <Input
                 type="tel"

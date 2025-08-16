@@ -2,11 +2,17 @@
 
 This is a Tutoring Club Parent Portal - a full-stack TypeScript web application that allows parents to view their children's tutoring information, manage schedules, and handle billing. The application is built as a modern monorepo with a React frontend, Express.js backend, and shared schema definitions.
 
-The portal provides functionality for parent authentication, student overview with progress tracking, session scheduling and change requests, and billing management. The system was migrated from a legacy Flask/SQL Server application to a modern TypeScript stack.
+The portal provides functionality for parent authentication using email and phone number credentials, student overview with progress tracking, session scheduling and change requests, and billing management. The system was migrated from a legacy Flask/SQL Server application to a modern TypeScript stack while maintaining connection to the existing SQL Server database.
 
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
+
+## Recent Changes (August 2025)
+- Updated authentication system to use email as username and phone number as password
+- Connected to existing SQL Server database using legacy table structure (tblInquiry, tblstudents, tblSessionSchedule)
+- Implemented SQL Server storage functions with error handling for stored procedures
+- Added Tutoring Club branding with official logo and color scheme
 
 # System Architecture
 

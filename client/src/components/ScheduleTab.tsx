@@ -78,7 +78,9 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
     });
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string | undefined) => {
+    if (!status) return "bg-gray-100 text-gray-800";
+    
     switch (status.toLowerCase()) {
       case "confirmed":
         return "bg-green-100 text-green-800";
@@ -119,14 +121,14 @@ export default function ScheduleTab({ data, students }: ScheduleTabProps) {
                       <td className="px-4 py-3 text-sm font-medium text-text-dark">
                         {session.studentName}
                       </td>
-                      <td className="px-4 py-3 text-sm text-text-light">{session.dayOfWeek}</td>
+                      <td className="px-4 py-3 text-sm text-text-light">{session.Day || session.dayOfWeek || 'N/A'}</td>
                       <td className="px-4 py-3 text-sm text-text-light">
-                        {session.startTime} - {session.endTime}
+                        {session.Time || `${session.startTime} - ${session.endTime}` || 'N/A'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-text-light">{session.subject}</td>
+                      <td className="px-4 py-3 text-sm text-text-light">{session.subject || 'Tutoring'}</td>
                       <td className="px-4 py-3">
                         <Badge className={getStatusColor(session.status)}>
-                          {session.status}
+                          {session.status || 'Active'}
                         </Badge>
                       </td>
                     </tr>
