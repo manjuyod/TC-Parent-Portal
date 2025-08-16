@@ -127,14 +127,56 @@ export async function getTime(timeId: number): Promise<string | null> {
 
     if (result.recordset.length > 0 && result.recordset[0].Time) {
       const timeValue = result.recordset[0].Time;
+      console.log('Raw time value from DB:', timeValue, 'Type:', typeof timeValue);
 
-      // Parse and format time
-      const date = new Date(`1970-01-01T${timeValue}`);
-      return date.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
+      let formattedTime = null;
+
+      // Handle different time formats from SQL Server
+      if (timeValue instanceof Date) {
+        // If it's already a Date object, format it directly
+        formattedTime = timeValue.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        });
+      } else if (typeof timeValue === 'string') {
+        // Handle string time formats
+        try {
+          // Try parsing as HH:MM:SS format
+          const timeRegex = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
+          const match = timeValue.match(timeRegex);
+          
+          if (match) {
+            const hours = parseInt(match[1], 10);
+            const minutes = parseInt(match[2], 10);
+            
+            // Create a proper date object for formatting
+            const date = new Date();
+            date.setHours(hours, minutes, 0, 0);
+            
+            formattedTime = date.toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            });
+          } else {
+            // Fallback: try parsing with Date constructor
+            const date = new Date(`1970-01-01T${timeValue}`);
+            if (!isNaN(date.getTime())) {
+              formattedTime = date.toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              });
+            }
+          }
+        } catch (parseError) {
+          console.error('Error parsing time string:', parseError);
+        }
+      }
+
+      console.log('Formatted time:', formattedTime);
+      return formattedTime;
     }
 
     return null;
