@@ -228,37 +228,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: result.error });
       }
 
-      // Send email notification to franchise
-      try {
-        const emailResult = await emailService.sendScheduleChangeRequest(
-          franchiseEmail,
-          {
-            name: inquiryData.inquiry.FirstName + ' ' + inquiryData.inquiry.LastName,
-            email: email,
-            phone: contactPhone
-          },
-          {
-            name: student.FirstName + ' ' + student.LastName,
-            id: student.ID
-          },
-          {
-            currentSchedule: currentSession,
-            requestedChange: requestedChange,
-            reason: reason,
-            effectiveDate: preferredDate,
-            additionalNotes: additionalNotes || null
-          }
-        );
-
-        console.log('Schedule change email sent successfully:', emailResult.messageId);
-      } catch (emailError) {
-        console.error('Failed to send schedule change email:', emailError);
-        // Don't fail the request if email fails, but log it
-      }
-      
+      // Get franchise email for client-side email composition
       res.json({ 
         ...result, 
-        emailSent: true,
         franchiseEmail: franchiseEmail
       });
     } catch (error) {

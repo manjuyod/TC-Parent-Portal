@@ -3,6 +3,7 @@ import { useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
 import billingIconPath from "@assets/tcBillingIcon_1755332058201.png";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
+import EmailButton from "../components/EmailButton";
 
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
@@ -20,6 +21,7 @@ export default function Dashboard() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+  const [franchiseEmail, setFranchiseEmail] = useState("");
 
   const { data: user } = useQuery({
     queryKey: ["/api/auth/me"],
@@ -30,7 +32,12 @@ export default function Dashboard() {
     enabled: !!user,
   });
 
-  if (!user || !dashboardData) {
+  // Extract typed data with fallbacks
+  const students = (dashboardData as any)?.students || [];
+  const sessions = (dashboardData as any)?.sessions || [];
+  const billing = (dashboardData as any)?.billing || null;
+
+  if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
         <div className="text-center">
@@ -43,7 +50,7 @@ export default function Dashboard() {
     );
   }
 
-  const { students, sessions, billing } = dashboardData;
+  const user_data = (user as any)?.parent;
 
   // Filter sessions based on selected student
   const filteredSessions =
@@ -91,16 +98,8 @@ export default function Dashboard() {
       const result = await response.json();
 
       if (response.ok) {
-        setSubmitMessage("Schedule change request submitted successfully! The franchise has been notified via email.");
-        setScheduleForm({
-          studentId: "",
-          currentSession: "",
-          preferredDate: "",
-          preferredTime: "",
-          requestedChange: "",
-          reason: "",
-          additionalNotes: ""
-        });
+        setSubmitMessage("Schedule change request submitted successfully! Use the 'Email Home Center' button to send the request.");
+        setFranchiseEmail(result.franchiseEmail || "");
       } else {
         setSubmitMessage(`Error: ${result.message}`);
       }
@@ -346,13 +345,30 @@ export default function Dashboard() {
                     onChange={(e) => setScheduleForm({...scheduleForm, additionalNotes: e.target.value})}
                   ></textarea>
                 </div>
-                <button 
-                  type="submit" 
-                  className="btn btn-success"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? 'Submitting...' : 'Submit Schedule Change Request'}
-                </button>
+                <div className="d-flex gap-2">
+                  <button 
+                    type="submit" 
+                    className="btn btn-success"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Submit Schedule Change Request'}
+                  </button>
+                  
+                  {scheduleForm.studentId && scheduleForm.currentSession && scheduleForm.requestedChange && (
+                    <EmailButton
+                      to={franchiseEmail || "franchise@example.com"}
+                      studentName={students.find((s: any) => s.id.toString() === scheduleForm.studentId)?.name || 'Unknown Student'}
+                      details={{
+                        current: scheduleForm.currentSession,
+                        requested: scheduleForm.requestedChange,
+                        reason: scheduleForm.reason,
+                        effectiveDate: scheduleForm.preferredDate,
+                        notes: scheduleForm.additionalNotes
+                      }}
+                      prefer="mailto"
+                    />
+                  )}
+                </div>
               </form>
             </div>
           </div>
