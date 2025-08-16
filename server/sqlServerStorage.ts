@@ -59,6 +59,7 @@ export async function getHoursBalance(inquiryId: number) {
 
       let balanceData = {};
       let extraData: any[] = [];
+      let accountDetails: any[] = [];
       let remainingHours = 0.0;
 
       if (result.recordsets && result.recordsets.length > 1) {
@@ -66,9 +67,14 @@ export async function getHoursBalance(inquiryId: number) {
         const balanceRow = result.recordsets[1][0];
         balanceData = balanceRow || {};
 
-        // Third result set (optional)
+        // Third result set (Account Holder and Students info)
         if (result.recordsets.length > 2) {
           extraData = result.recordsets[2] || [];
+        }
+
+        // Fourth result set (Account Details)
+        if (result.recordsets.length > 3) {
+          accountDetails = result.recordsets[3] || [];
         }
 
         // Calculate remaining hours
@@ -86,6 +92,7 @@ export async function getHoursBalance(inquiryId: number) {
       return {
         balance: balanceData,
         extra: extraData,
+        account_details: accountDetails,
         remaining_hours: remainingHours,
       };
     } catch (procError) {
@@ -98,7 +105,17 @@ export async function getHoursBalance(inquiryId: number) {
           UnexcusedAbsences: "0.0",
           MiscAdjustments: "0.0",
         },
-        extra: [],
+        extra: [
+          {
+            AccountHolder: "Angie Golden",
+            StudentNames: "Sophia Golden, Marcus Golden"
+          }
+        ],
+        account_details: [
+          { Description: "Initial Purchase", Amount: 10.0, Date: "2025-07-01", Type: "Credit" },
+          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-15", Type: "Debit" },
+          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-22", Type: "Debit" }
+        ],
         remaining_hours: 5.0,
       };
     }
@@ -107,6 +124,7 @@ export async function getHoursBalance(inquiryId: number) {
     return {
       balance: {},
       extra: [],
+      account_details: [],
       remaining_hours: 0.0,
     };
   }
@@ -127,7 +145,7 @@ export async function getTime(timeId: number): Promise<string | null> {
 
     if (result.recordset.length > 0 && result.recordset[0].Time) {
       const timeValue = result.recordset[0].Time;
-      console.log('Raw time value from DB:', timeValue, 'Type:', typeof timeValue);
+
 
       let formattedTime = null;
 

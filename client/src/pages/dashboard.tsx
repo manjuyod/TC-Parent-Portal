@@ -333,33 +333,80 @@ export default function Dashboard() {
           {/* Account Balance Report */}
           <div className="card mb-4">
             <div className="card-header">
-              <h5>Account Balance Report</h5>
+              <h5 style={{ color: "white", margin: 0 }}>Account Balance Report</h5>
             </div>
             <div className="card-body">
               <div className="table-container">
                 <table className="table table-striped table-sm">
                   <thead>
                     <tr>
-                      <th>Student Name</th>
+                      <th>Account Holder</th>
+                      <th>Students</th>
                       <th>Hours Remaining</th>
-                      <th>Last Payment</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map((student: any) => (
-                      <tr key={student.id}>
-                        <td>{student.name}</td>
-                        <td>
-                          {billing?.remaining_hours?.toFixed(1) || "0.0"} hours
+                    {billing?.extra && billing.extra.length > 0 ? (
+                      billing.extra.map((account: any, index: number) => (
+                        <tr key={index}>
+                          <td>{account.AccountHolder || "N/A"}</td>
+                          <td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
+                          <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="text-center text-muted">
+                          No account information available
                         </td>
-                        <td>N/A</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
+
+          {/* Account Details */}
+          {billing?.account_details && billing.account_details.length > 0 && (
+            <div className="card mb-4">
+              <div className="card-header">
+                <h5 style={{ color: "white", margin: 0 }}>Account Details</h5>
+              </div>
+              <div className="card-body">
+                <div className="table-container">
+                  <table className="table table-striped table-sm">
+                    <thead>
+                      <tr>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Date</th>
+                        <th>Type</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billing.account_details.map((detail: any, index: number) => (
+                        <tr key={index}>
+                          <td>{detail.Description || "N/A"}</td>
+                          <td>
+                            <span className={detail.Type === "Credit" ? "text-success" : "text-danger"}>
+                              {detail.Type === "Credit" ? "+" : ""}{detail.Amount || 0}
+                            </span>
+                          </td>
+                          <td>{detail.Date || "N/A"}</td>
+                          <td>
+                            <span className={`badge ${detail.Type === "Credit" ? "bg-success" : "bg-danger"}`}>
+                              {detail.Type || "N/A"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
