@@ -107,14 +107,11 @@ export default function Dashboard() {
 
   // 3. Load billing immediately after students (show account balance right away)
   const { data: billingData } = useQuery({
-    queryKey: ["/api/billing", Date.now()], // Force fresh request
+    queryKey: ["/api/billing"],
     enabled: !!user,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
-
-  // Log what we're getting from billing API
-  console.log("Billing data received:", billingData);
 
   // Extract typed data with fallbacks
   const recentSessions = (recentSessionsData as any)?.sessions || [];
@@ -549,7 +546,7 @@ export default function Dashboard() {
                       billing.extra.map((account: any, index: number) => (
                         <tr key={index}>
                           <td>{account.AccountHolder || "N/A"}</td>
-                          <td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
+                          <td>{account.Students || students.map((s: any) => s.name).join(", ")}</td>
                           <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
                         </tr>
                       ))

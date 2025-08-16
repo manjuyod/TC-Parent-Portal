@@ -269,13 +269,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const billingInfo = await getHoursBalance(inquiryId);
       
       res.json({
-        billing: billingInfo ? {
-          total_hours: billingInfo.total_hours || 0,
-          used_hours: billingInfo.used_hours || 0,
-          remaining_hours: billingInfo.remaining_hours || 0,
-          next_payment_date: billingInfo.next_payment_date || null,
-          account_details: billingInfo.account_details || []
-        } : null
+        billing: billingInfo || null
       });
     } catch (error) {
       console.error('Billing error:', error);

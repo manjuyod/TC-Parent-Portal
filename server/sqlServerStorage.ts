@@ -102,7 +102,7 @@ export async function getHoursBalance(inquiryId: number) {
           const accountInfo = result.recordsets[2][0];
           extraData = [{
             AccountHolder: accountInfo.AccountHolder,
-            StudentNames: accountInfo.Students
+            Students: accountInfo.Students  // Use "Students" not "StudentNames" to match frontend
           }];
         }
 
@@ -120,10 +120,7 @@ export async function getHoursBalance(inquiryId: number) {
         remainingHours = purchases + attendance + absences + adjustments;
       }
 
-      console.log("Returning billing data:");
-      console.log("- extraData:", JSON.stringify(extraData, null, 2));
-      console.log("- accountDetails count:", accountDetails.length);
-      console.log("- remainingHours:", remainingHours);
+      // Debug logging removed
       
       return {
         balance: balanceData,
