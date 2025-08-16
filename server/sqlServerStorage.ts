@@ -83,15 +83,25 @@ export async function getHoursBalance(inquiryId: number) {
         "dpinkney_TC.dbo.USP_Report_AccountBalance",
       );
 
-      let balanceData = {};
+      let balanceData: any = {};
       let extraData: any[] = [];
       let accountDetails: any[] = [];
       let remainingHours = 0.0;
 
-      if (result.recordsets && result.recordsets.length > 1) {
+      if (result.recordsets && Array.isArray(result.recordsets) && result.recordsets.length > 0) {
+        console.log("Processing stored procedure result sets:");
+        result.recordsets.forEach((recordset: any, index: number) => {
+          console.log(`Result set ${index}: ${recordset.length} rows`);
+          if (recordset.length > 0) {
+            console.log(`First row keys:`, Object.keys(recordset[0]));
+          }
+        });
+
         // Second result set (balance-related info)
-        const balanceRow = result.recordsets[1][0];
-        balanceData = balanceRow || {};
+        if (result.recordsets.length > 1) {
+          const balanceRow = result.recordsets[1][0];
+          balanceData = balanceRow || {};
+        }
 
         // Third result set (Account Holder and Students info)
         if (result.recordsets.length > 2) {
@@ -104,13 +114,10 @@ export async function getHoursBalance(inquiryId: number) {
         }
 
         // Calculate remaining hours
-        const purchases = parseFloat(balanceData["Purchases"] || "0") || 0.0;
-        const attendance =
-          parseFloat(balanceData["AttendancePresent"] || "0") || 0.0;
-        const absences =
-          parseFloat(balanceData["UnexcusedAbsences"] || "0") || 0.0;
-        const adjustments =
-          parseFloat(balanceData["MiscAdjustments"] || "0") || 0.0;
+        const purchases = parseFloat((balanceData as any)["Purchases"] || "0") || 0.0;
+        const attendance = parseFloat((balanceData as any)["AttendancePresent"] || "0") || 0.0;
+        const absences = parseFloat((balanceData as any)["UnexcusedAbsences"] || "0") || 0.0;
+        const adjustments = parseFloat((balanceData as any)["MiscAdjustments"] || "0") || 0.0;
 
         remainingHours = purchases + attendance + absences + adjustments;
       }
@@ -121,7 +128,7 @@ export async function getHoursBalance(inquiryId: number) {
         account_details: accountDetails,
         remaining_hours: remainingHours,
       };
-    } catch (procError) {
+    } catch (procError: any) {
       console.error("Stored procedure error:", procError.message);
       // Return empty structure when stored procedure fails
       return {
