@@ -74,14 +74,28 @@ export async function getFranchiseEmail(inquiryId: number): Promise<string | nul
 
 export async function getHoursBalance(inquiryId: number) {
   try {
+    console.log("=== getHoursBalance called ===");
+    console.log("InquiryId:", inquiryId);
+    
     const request = pool.request();
     request.input("inqID", sql.Int, inquiryId);
 
     // Call the stored procedure - Note: this might need adjustment based on actual procedure signature
     try {
+      console.log("Executing stored procedure: dpinkney_TC.dbo.USP_Report_AccountBalance");
       const result = await request.execute(
         "dpinkney_TC.dbo.USP_Report_AccountBalance",
       );
+      
+      console.log("Stored procedure result recordsets length:", result.recordsets?.length);
+      if (result.recordsets) {
+        result.recordsets.forEach((recordset, index) => {
+          console.log(`Recordset ${index} length:`, recordset.length);
+          if (recordset.length > 0) {
+            console.log(`Recordset ${index} first row:`, recordset[0]);
+          }
+        });
+      }
 
       let balanceData: any = {};
       let extraData: any[] = [];
