@@ -136,6 +136,16 @@ body {
   padding: 20px;
 }
 
+.card-header h5, .card-header h6 {
+  color: white !important;
+  margin: 0;
+}
+
+.card-header h5, .card-header h6 {
+  color: white !important;
+  margin: 0;
+}
+
 .alert {
   border: none;
   border-radius: 8px;
