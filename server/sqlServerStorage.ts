@@ -79,17 +79,9 @@ export async function getHoursBalance(inquiryId: number) {
 
     // Call the stored procedure - Note: this might need adjustment based on actual procedure signature
     try {
-      console.log(`Calling stored procedure USP_Report_AccountBalance with inquiryId: ${inquiryId}`);
       const result = await request.execute(
         "dpinkney_TC.dbo.USP_Report_AccountBalance",
       );
-
-      console.log(`Stored procedure SUCCESS. Recordsets count: ${result.recordsets?.length || 0}`);
-      if (result.recordsets && result.recordsets.length > 0) {
-        result.recordsets.forEach((recordset, index) => {
-          console.log(`Result set ${index}: ${recordset.length} rows`);
-        });
-      }
 
       let balanceData = {};
       let extraData: any[] = [];
@@ -130,8 +122,7 @@ export async function getHoursBalance(inquiryId: number) {
         remaining_hours: remainingHours,
       };
     } catch (procError) {
-      console.log("Stored procedure FAILED:", procError.message);
-      console.log("Full error:", procError);
+      console.error("Stored procedure error:", procError.message);
       // Return empty structure when stored procedure fails
       return {
         balance: {},
