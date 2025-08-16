@@ -3,25 +3,10 @@ import { useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
 import billingIconPath from "@assets/tcBillingIcon_1755332058201.png";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
-import EmailButton from "../components/EmailButton";
 
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState("home");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-  const [scheduleForm, setScheduleForm] = useState({
-    studentId: "",
-    currentSession: "",
-    preferredDate: "",
-    preferredTime: "",
-    requestedChange: "",
-    reason: "",
-    additionalNotes: ""
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitMessage, setSubmitMessage] = useState("");
-  const [franchiseEmail, setFranchiseEmail] = useState("");
 
   const { data: user } = useQuery({
     queryKey: ["/api/auth/me"],
@@ -32,12 +17,7 @@ export default function Dashboard() {
     enabled: !!user,
   });
 
-  // Extract typed data with fallbacks
-  const students = (dashboardData as any)?.students || [];
-  const sessions = (dashboardData as any)?.sessions || [];
-  const billing = (dashboardData as any)?.billing || null;
-
-  if (!user) {
+  if (!user || !dashboardData) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
         <div className="text-center">
@@ -50,7 +30,7 @@ export default function Dashboard() {
     );
   }
 
-  const user_data = (user as any)?.parent;
+  const { students, sessions, billing } = dashboardData;
 
   // Filter sessions based on selected student
   const filteredSessions =
@@ -66,40 +46,6 @@ export default function Dashboard() {
       window.location.href = "/login";
     } catch (error) {
       console.error("Logout error:", error);
-    }
-  };
-
-  // Pagination functions
-  const getCurrentPageItems = () => {
-    if (!billing?.account_details) return [];
-    if (itemsPerPage >= billing.account_details.length) return billing.account_details;
-    
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return billing.account_details.slice(startIndex, endIndex);
-  };
-
-  const totalPages = billing?.account_details ? Math.ceil(billing.account_details.length / itemsPerPage) : 1;
-
-  // Fetch franchise email when student is selected
-  const fetchFranchiseEmail = async (studentId: string) => {
-    if (!studentId) return;
-    
-    try {
-      const response = await fetch("/api/get-franchise-email", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ studentId: studentId }),
-      });
-
-      const result = await response.json();
-      if (response.ok) {
-        setFranchiseEmail(result.franchiseEmail || "");
-      }
-    } catch (error) {
-      console.error("Error fetching franchise email:", error);
     }
   };
 
@@ -227,33 +173,16 @@ export default function Dashboard() {
               <h5>Request Schedule Change</h5>
             </div>
             <div className="card-body">
-              {submitMessage && (
-                <div className={`alert ${submitMessage.includes('Error') ? 'alert-danger' : 'alert-success'} mb-3`}>
-                  {submitMessage}
-                </div>
-              )}
-              
-              <div className="schedule-form">{/* Schedule Change Form */}
+              <form>
                 <div className="row">
                   <div className="col-md-6 mb-3">
                     <label htmlFor="student_name" className="form-label">
                       Student Name
                     </label>
-                    <select 
-                      className="form-control" 
-                      id="student_name" 
-                      value={scheduleForm.studentId}
-                      onChange={(e) => {
-                        setScheduleForm({...scheduleForm, studentId: e.target.value});
-                        if (e.target.value) {
-                          fetchFranchiseEmail(e.target.value);
-                        }
-                      }}
-                      required
-                    >
+                    <select className="form-control" id="student_name" required>
                       <option value="">Select a student</option>
                       {students.map((student: any) => (
-                        <option key={student.id} value={student.id}>
+                        <option key={student.id} value={student.name}>
                           {student.name}
                         </option>
                       ))}
@@ -268,8 +197,6 @@ export default function Dashboard() {
                       className="form-control"
                       id="current_session"
                       placeholder="e.g., Monday 3:00 PM"
-                      value={scheduleForm.currentSession}
-                      onChange={(e) => setScheduleForm({...scheduleForm, currentSession: e.target.value})}
                       required
                     />
                   </div>
@@ -283,8 +210,6 @@ export default function Dashboard() {
                       type="date"
                       className="form-control"
                       id="preferred_date"
-                      value={scheduleForm.preferredDate}
-                      onChange={(e) => setScheduleForm({...scheduleForm, preferredDate: e.target.value})}
                       required
                     />
                   </div>
@@ -296,8 +221,6 @@ export default function Dashboard() {
                       type="time"
                       className="form-control"
                       id="preferred_time"
-                      value={scheduleForm.preferredTime}
-                      onChange={(e) => setScheduleForm({...scheduleForm, preferredTime: e.target.value})}
                       required
                     />
                   </div>
@@ -311,8 +234,6 @@ export default function Dashboard() {
                     id="requested_change"
                     rows={3}
                     placeholder="Describe what changes you would like to make"
-                    value={scheduleForm.requestedChange}
-                    onChange={(e) => setScheduleForm({...scheduleForm, requestedChange: e.target.value})}
                     required
                   ></textarea>
                 </div>
@@ -325,38 +246,12 @@ export default function Dashboard() {
                     id="reason"
                     rows={3}
                     placeholder="Please explain why you need this schedule change"
-                    value={scheduleForm.reason}
-                    onChange={(e) => setScheduleForm({...scheduleForm, reason: e.target.value})}
                   ></textarea>
                 </div>
-                <div className="mb-3">
-                  <label htmlFor="additional_notes" className="form-label">
-                    Additional Notes (Optional)
-                  </label>
-                  <textarea
-                    className="form-control"
-                    id="additional_notes"
-                    rows={2}
-                    placeholder="Any additional information you'd like to share"
-                    value={scheduleForm.additionalNotes}
-                    onChange={(e) => setScheduleForm({...scheduleForm, additionalNotes: e.target.value})}
-                  ></textarea>
-                </div>
-                {scheduleForm.studentId && scheduleForm.currentSession && scheduleForm.requestedChange && (
-                  <EmailButton
-                    to={franchiseEmail || "franchise@example.com"}
-                    studentName={students.find((s: any) => s.id.toString() === scheduleForm.studentId)?.name || 'Unknown Student'}
-                    details={{
-                      current: scheduleForm.currentSession,
-                      requested: scheduleForm.requestedChange,
-                      reason: scheduleForm.reason,
-                      effectiveDate: scheduleForm.preferredDate,
-                      notes: scheduleForm.additionalNotes
-                    }}
-                    prefer="mailto"
-                  />
-                )}
-              </div>
+                <button type="submit" className="btn btn-success">
+                  Submit Schedule Change Request
+                </button>
+              </form>
             </div>
           </div>
         </div>
@@ -480,43 +375,23 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div className="table-container">
-                  <div className="d-flex justify-content-between align-items-center mb-3">
-                    <div>
-                      <label className="form-label me-2">Show:</label>
-                      <select 
-                        className="form-select form-select-sm d-inline-block w-auto"
-                        value={itemsPerPage}
-                        onChange={(e) => {
-                          setItemsPerPage(Number(e.target.value));
-                          setCurrentPage(1);
-                        }}
-                      >
-                        <option value={50}>50 items</option>
-                        <option value={100}>100 items</option>
-                        <option value={200}>200 items</option>
-                        <option value={billing.account_details.length}>All items</option>
-                      </select>
-                    </div>
-                    <div className="text-muted small">
-                      Showing {Math.min((currentPage - 1) * itemsPerPage + 1, billing.account_details.length)} - {Math.min(currentPage * itemsPerPage, billing.account_details.length)} of {billing.account_details.length} records
-                    </div>
-                  </div>
-                  
                   <table className="table table-striped table-sm">
                     <thead>
                       <tr>
                         <th>Date</th>
                         <th>Student</th>
                         <th>Event Type</th>
+                        <th>Attendance</th>
                         <th>Adjustment</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {getCurrentPageItems().map((detail: any, index: number) => (
+                      {billing.account_details.map((detail: any, index: number) => (
                         <tr key={index}>
                           <td>{detail.FormattedDate || "N/A"}</td>
                           <td>{detail.Student || "N/A"}</td>
                           <td>{detail.EventType || "N/A"}</td>
+                          <td>{detail.Attendance || "N/A"}</td>
                           <td>
                             <span className={detail.Adjustment > 0 ? "text-success" : detail.Adjustment < 0 ? "text-danger" : ""}>
                               {detail.Adjustment > 0 ? "+" : ""}{detail.Adjustment || 0}
@@ -526,51 +401,6 @@ export default function Dashboard() {
                       ))}
                     </tbody>
                   </table>
-                  
-                  {/* Pagination Controls */}
-                  {totalPages > 1 && (
-                    <nav aria-label="Account details pagination" className="mt-3">
-                      <ul className="pagination pagination-sm justify-content-center">
-                        <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                          <button 
-                            className="page-link" 
-                            onClick={() => setCurrentPage(currentPage - 1)}
-                            disabled={currentPage === 1}
-                          >
-                            Previous
-                          </button>
-                        </li>
-                        
-                        {/* Page numbers */}
-                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                          const pageNum = Math.max(1, Math.min(totalPages - 4, currentPage - 2)) + i;
-                          if (pageNum <= totalPages) {
-                            return (
-                              <li key={pageNum} className={`page-item ${currentPage === pageNum ? 'active' : ''}`}>
-                                <button 
-                                  className="page-link" 
-                                  onClick={() => setCurrentPage(pageNum)}
-                                >
-                                  {pageNum}
-                                </button>
-                              </li>
-                            );
-                          }
-                          return null;
-                        })}
-                        
-                        <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
-                          <button 
-                            className="page-link" 
-                            onClick={() => setCurrentPage(currentPage + 1)}
-                            disabled={currentPage === totalPages}
-                          >
-                            Next
-                          </button>
-                        </li>
-                      </ul>
-                    </nav>
-                  )}
                 </div>
               </div>
             </div>

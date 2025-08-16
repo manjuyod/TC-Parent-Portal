@@ -1,7 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest, getFranchiseEmail, query } from "./sqlServerStorage";
-import { emailService } from "./emailService";
+import { findInquiryByEmailAndPhone, getHoursBalance, getSessions, searchStudent, submitScheduleChangeRequest } from "./sqlServerStorage";
 import { loginSchema } from "@shared/schema";
 import session from "express-session";
 
@@ -186,35 +185,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Submit schedule change request
   app.post("/api/schedule-change-request", requireAuth, async (req, res) => {
     try {
-      const { studentId, currentSession, preferredDate, preferredTime, requestedChange, reason, additionalNotes } = req.body;
+      const { studentId, currentSession, preferredDate, preferredTime, requestedChange, reason } = req.body;
       const studentIds = req.session.studentIds || [];
-      const inquiryId = req.session.inquiryId!;
-      const email = req.session.email!;
-      const contactPhone = req.session.contactPhone!;
       
       // Verify the student belongs to the authenticated parent
       if (!studentIds.includes(parseInt(studentId))) {
         return res.status(403).json({ message: "Unauthorized access to student" });
       }
 
-      // Get parent and student information for email
-      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) {
-        return res.status(404).json({ message: "Parent data not found" });
-      }
-
-      const student = inquiryData.students.find((s: any) => s.ID === parseInt(studentId));
-      if (!student) {
-        return res.status(404).json({ message: "Student not found" });
-      }
-
-      // Get franchise email
-      const franchiseEmail = await getFranchiseEmail(inquiryId);
-      if (!franchiseEmail) {
-        return res.status(404).json({ message: "Franchise email not found" });
-      }
-
-      // Submit the schedule change request (existing functionality)
       const result = await submitScheduleChangeRequest({
         studentId: parseInt(studentId),
         currentSession,
@@ -227,58 +205,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (result.error) {
         return res.status(400).json({ message: result.error });
       }
-
-      // Get franchise email for client-side email composition
-      res.json({ 
-        ...result, 
-        franchiseEmail: franchiseEmail
-      });
+      
+      res.json(result);
     } catch (error) {
       console.error('Schedule change request error:', error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // New endpoint to get franchise email based on student
-  app.post("/api/get-franchise-email", async (req, res) => {
-    try {
-      const { studentId } = req.body;
-      
-      if (!studentId) {
-        return res.status(400).json({ message: "Student ID is required" });
-      }
-
-      // Get the inquiry ID for this student  
-      const inquiryResult = await query(
-        "SELECT InquiryID FROM tblstudents WHERE ID = @studentId",
-        { studentId: parseInt(studentId) }
-      );
-
-      if (!inquiryResult.recordset || inquiryResult.recordset.length === 0) {
-        return res.status(404).json({ message: "Student not found" });
-      }
-
-      const inquiryID = inquiryResult.recordset[0].InquiryID;
-
-      // Get franchise email using your specific query
-      const franchiseResult = await query(
-        "SELECT FranchiesEmail FROM tblFranchies WHERE ID IN (SELECT FranchiesID FROM tblInquiry WHERE ID = @InquiryID)",
-        { InquiryID: inquiryID }
-      );
-
-      if (!franchiseResult.recordset || franchiseResult.recordset.length === 0) {
-        return res.status(404).json({ message: "Franchise email not found" });
-      }
-
-      const franchiseEmail = franchiseResult.recordset[0].FranchiesEmail;
-
-      res.json({ 
-        franchiseEmail: franchiseEmail 
-      });
-
-    } catch (error) {
-      console.error("Error fetching franchise email:", error);
-      res.status(500).json({ message: "Internal server error" });
+      res.status(400).json({ message: "Invalid request data" });
     }
   });
 

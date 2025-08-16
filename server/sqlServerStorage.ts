@@ -46,32 +46,6 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
   }
 }
 
-export async function getFranchiseEmail(inquiryId: number): Promise<string | null> {
-  try {
-    const query = `
-      SELECT FranchiesEmail 
-      FROM tblFranchies 
-      WHERE ID = (
-        SELECT FranchiesId 
-        FROM tblinquiry 
-        WHERE ID = @inquiryId
-      )
-    `;
-
-    const request = pool.request();
-    request.input("inquiryId", sql.Int, inquiryId);
-    const result = await request.query(query);
-
-    if (result.recordset.length > 0) {
-      return result.recordset[0].FranchiesEmail;
-    }
-    return null;
-  } catch (error) {
-    console.error("Error getting franchise email:", error);
-    throw error;
-  }
-}
-
 export async function getHoursBalance(inquiryId: number) {
   try {
     const request = pool.request();
@@ -396,28 +370,5 @@ export async function submitScheduleChangeRequest(requestData: {
   } catch (error) {
     console.error("Error submitting schedule change request:", error);
     return { error: "Failed to submit request" };
-  }
-}
-
-// Generic query function for direct SQL execution
-export async function query(sql: string, params: Record<string, any> = {}) {
-  try {
-    const request = pool.request();
-    
-    // Add parameters to the request
-    for (const [key, value] of Object.entries(params)) {
-      if (typeof value === 'string') {
-        request.input(key, value);
-      } else if (typeof value === 'number') {
-        request.input(key, value);
-      } else {
-        request.input(key, value);
-      }
-    }
-    
-    return await request.query(sql);
-  } catch (error) {
-    console.error('SQL query error:', error);
-    throw error;
   }
 }
