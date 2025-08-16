@@ -121,32 +121,26 @@ ACTION REQUIRED: Please review this schedule change request and contact the pare
 This request was submitted on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}.
       `;
 
-      // Create email in RFC 2822 format
+      // Create email in proper RFC 2822 format for Gmail API
       const credentials = JSON.parse(process.env.gmailJSONCreds || '{}');
       const fromEmail = credentials.client_email || 'noreply@tutoringclub.com';
       
       const emailLines = [
-        `From: Tutoring Club Portal <${fromEmail}>`,
+        `From: "Tutoring Club Portal" <${fromEmail}>`,
         `To: ${franchiseEmail}`,
         `Subject: ${subject}`,
         `MIME-Version: 1.0`,
-        `Content-Type: multipart/alternative; boundary="boundary123"`,
-        ``,
-        `--boundary123`,
-        `Content-Type: text/plain; charset=utf-8`,
-        ``,
-        textContent,
-        ``,
-        `--boundary123`,
         `Content-Type: text/html; charset=utf-8`,
         ``,
-        htmlContent,
-        ``,
-        `--boundary123--`
+        htmlContent
       ];
 
-      const emailContent = emailLines.join('\r\n');
-      const encodedEmail = Buffer.from(emailContent).toString('base64url');
+      const emailContent = emailLines.join('\n');
+      const encodedEmail = Buffer.from(emailContent)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
 
       // Send email using Gmail API
       const result = await this.gmail.users.messages.send({
