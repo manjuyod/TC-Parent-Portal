@@ -1,39 +1,59 @@
-import sql from "mssql";
-import { pool } from "./db";
+import { getPool, sql } from "./db";
 
-// Legacy database functions ported from the attached Python files
+/** utility: normalize phone to 10 digits (strip non-digits, drop leading 1) */
+function normalizePhone(input: string): string | null {
+  if (!input) return null;
+  const digits = String(input).replace(/\D/g, "");
+  const stripped = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  return stripped.length === 10 ? stripped : null;
+}
+
+/** Find Inquiry (parent) by email + phone and list linked students */
 export async function findInquiryByEmailAndPhone(email: string, contactNum: string) {
   try {
+    const pool = await getPool();
     const request = pool.request();
 
-    // Step 1: Find the Inquiry ID from the parent's email and contact number
+    // JS-side normalization
+    const normalized = normalizePhone(contactNum);
+    if (!normalized) return null; // phone not a valid 10-digit number
+
+    // Case-insensitive email compare + SQL-side phone normalization using nested REPLACE
     const parentQuery = `
       SELECT ID AS InquiryID, Email, ContactPhone
       FROM tblInquiry
-      WHERE ContactPhone = @contactNum
-      AND Email = @email
+      WHERE LOWER(Email) = LOWER(@email)
+        AND REPLACE(
+              REPLACE(
+                REPLACE(
+                  REPLACE(
+                    REPLACE(
+                      REPLACE(ContactPhone, ' ', ''),
+                    '-', ''),
+                  '(', ''),
+                ')', ''),
+              '+', ''),
+            '.', '') = @cleanPhone
     `;
 
     request.input("email", sql.VarChar, email);
-    request.input("contactNum", sql.VarChar, contactNum);
-    const parentResult = await request.query(parentQuery);
+    request.input("cleanPhone", sql.VarChar, normalized);
 
-    if (parentResult.recordset.length === 0) {
-      return null; // No parent found
-    }
+    const parentResult = await request.query(parentQuery);
+    if (parentResult.recordset.length === 0) return null;
 
     const parent = parentResult.recordset[0];
-    const inquiryId = parent.InquiryID;
+    const inquiryId = parent.InquiryID as number;
 
-    // Step 2: Find the student(s) linked to that Inquiry ID
+    // Fetch linked students
+    const studentRequest = pool.request();
+    studentRequest.input("inquiryId", sql.Int, inquiryId);
+
     const studentQuery = `
       SELECT ID, FirstName, LastName
       FROM tblstudents
       WHERE InquiryID = @inquiryId
     `;
-
-    const studentRequest = pool.request();
-    studentRequest.input("inquiryId", sql.Int, inquiryId);
     const studentResult = await studentRequest.query(studentQuery);
 
     return {
@@ -41,53 +61,46 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
       students: studentResult.recordset,
     };
   } catch (error) {
-    console.error("Error finding inquiry by contact phone:", error);
+    console.error("Error finding inquiry by email/phone:", error);
     throw error;
   }
 }
 
+/** Call USP_Report_AccountBalance and shape result sets */
 export async function getHoursBalance(inquiryId: number) {
   try {
+    const pool = await getPool();
     const request = pool.request();
     request.input("inqID", sql.Int, inquiryId);
 
-    // Call the stored procedure - Note: this might need adjustment based on actual procedure signature
     try {
-      const result = await request.execute(
-        "dpinkney_TC.dbo.USP_Report_AccountBalance",
-      );
+      const result = await request.execute("dpinkney_TC.dbo.USP_Report_AccountBalance");
 
-      // Stored procedure executed successfully
-
-      let balanceData = {};
+      let balanceData: Record<string, any> = {};
       let extraData: any[] = [];
       let accountDetails: any[] = [];
       let remainingHours = 0.0;
 
       if (result.recordsets && result.recordsets.length > 1) {
-        // Second result set (balance-related info)
-        const balanceRow = result.recordsets[1][0];
-        balanceData = balanceRow || {};
+        const balanceRow = result.recordsets[1]?.[0];
+        balanceData = balanceRow ?? {};
 
-        // Third result set (Account Holder and Students info)
         if (result.recordsets.length > 2) {
-          extraData = result.recordsets[2] || [];
+          extraData = result.recordsets[2] ?? [];
         }
-
-        // Fourth result set (Account Details)
         if (result.recordsets.length > 3) {
-          accountDetails = result.recordsets[3] || [];
+          accountDetails = result.recordsets[3] ?? [];
         }
 
-        // Calculate remaining hours
-        const purchases = parseFloat(balanceData["Purchases"] || "0") || 0.0;
-        const attendance =
-          parseFloat(balanceData["AttendancePresent"] || "0") || 0.0;
-        const absences =
-          parseFloat(balanceData["UnexcusedAbsences"] || "0") || 0.0;
-        const adjustments =
-          parseFloat(balanceData["MiscAdjustments"] || "0") || 0.0;
+        const toFloat = (v: any) => {
+          const n = parseFloat(v ?? "0");
+          return Number.isFinite(n) ? n : 0;
+        };
 
+        const purchases = toFloat(balanceData["Purchases"]);
+        const attendance = toFloat(balanceData["AttendancePresent"]);
+        const absences = toFloat(balanceData["UnexcusedAbsences"]);
+        const adjustments = toFloat(balanceData["MiscAdjustments"]);
         remainingHours = purchases + attendance + absences + adjustments;
       }
 
@@ -97,9 +110,8 @@ export async function getHoursBalance(inquiryId: number) {
         account_details: accountDetails,
         remaining_hours: remainingHours,
       };
-    } catch (procError) {
-      console.log("Stored procedure error:", procError.message);
-      // Return mock data structure for development
+    } catch (procError: any) {
+      console.warn("Stored procedure error:", procError?.message);
       return {
         balance: {
           Purchases: "10.0",
@@ -108,35 +120,22 @@ export async function getHoursBalance(inquiryId: number) {
           MiscAdjustments: "0.0",
         },
         extra: [
-          {
-            AccountHolder: "Angie Golden",
-            StudentNames: "Sophia Golden, Marcus Golden"
-          }
+          { AccountHolder: "Example Parent", StudentNames: "Example Student" },
         ],
-        account_details: [
-          { Description: "Initial Purchase", Amount: 10.0, Date: "2025-07-01", Type: "Credit" },
-          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-15", Type: "Debit" },
-          { Description: "Session Attendance", Amount: -1.0, Date: "2025-07-22", Type: "Debit" },
-          { Description: "Balance Adjustment", Amount: 2.0, Date: "2025-08-01", Type: "Credit" },
-          { Description: "Session Attendance", Amount: -1.5, Date: "2025-08-05", Type: "Debit" },
-          { Description: "Package Purchase", Amount: 15.0, Date: "2025-08-10", Type: "Credit" }
-        ],
+        account_details: [],
         remaining_hours: 5.0,
       };
     }
   } catch (error) {
     console.error("Error getting hours balance:", error);
-    return {
-      balance: {},
-      extra: [],
-      account_details: [],
-      remaining_hours: 0.0,
-    };
+    return { balance: {}, extra: [], account_details: [], remaining_hours: 0.0 };
   }
 }
 
+/** Translate a TimeID to a human-readable time (e.g., 1:00 PM) */
 export async function getTime(timeId: number): Promise<string | null> {
   try {
+    const pool = await getPool();
     const request = pool.request();
     request.input("timeId", sql.Int, timeId);
 
@@ -145,61 +144,29 @@ export async function getTime(timeId: number): Promise<string | null> {
       FROM tblTimes
       WHERE ID = @timeId
     `;
-
     const result = await request.query(query);
 
-    if (result.recordset.length > 0 && result.recordset[0].Time) {
-      const timeValue = result.recordset[0].Time;
+    if (result.recordset.length === 0) return null;
 
+    const timeValue = result.recordset[0].Time;
 
-      let formattedTime = null;
+    if (timeValue instanceof Date) {
+      return timeValue.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    }
 
-      // Handle different time formats from SQL Server
-      if (timeValue instanceof Date) {
-        // If it's already a Date object, format it directly
-        formattedTime = timeValue.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        });
-      } else if (typeof timeValue === 'string') {
-        // Handle string time formats
-        try {
-          // Try parsing as HH:MM:SS format
-          const timeRegex = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
-          const match = timeValue.match(timeRegex);
-          
-          if (match) {
-            const hours = parseInt(match[1], 10);
-            const minutes = parseInt(match[2], 10);
-            
-            // Create a proper date object for formatting
-            const date = new Date();
-            date.setHours(hours, minutes, 0, 0);
-            
-            formattedTime = date.toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-            });
-          } else {
-            // Fallback: try parsing with Date constructor
-            const date = new Date(`1970-01-01T${timeValue}`);
-            if (!isNaN(date.getTime())) {
-              formattedTime = date.toLocaleTimeString("en-US", {
-                hour: "numeric",
-                minute: "2-digit",
-                hour12: true,
-              });
-            }
-          }
-        } catch (parseError) {
-          console.error('Error parsing time string:', parseError);
-        }
+    if (typeof timeValue === "string") {
+      const m = timeValue.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+      if (m) {
+        const h = parseInt(m[1], 10);
+        const min = parseInt(m[2], 10);
+        const d = new Date();
+        d.setHours(h, min, 0, 0);
+        return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       }
-
-      console.log('Formatted time:', formattedTime);
-      return formattedTime;
+      const d = new Date(`1970-01-01T${timeValue}`);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      }
     }
 
     return null;
@@ -209,8 +176,10 @@ export async function getTime(timeId: number): Promise<string | null> {
   }
 }
 
+/** Sessions for a student (current month only) + categorized recent/upcoming */
 export async function getSessions(studentId: number) {
   try {
+    const pool = await getPool();
     const request = pool.request();
     request.input("studentId", sql.Int, studentId);
 
@@ -219,13 +188,11 @@ export async function getSessions(studentId: number) {
       FROM dpinkney_TC.dbo.tblSessionSchedule 
       WHERE StudentId1 = @studentId
     `;
-
     const result = await request.query(query);
     const allSessions = result.recordset;
 
-    // Current month and year
     const today = new Date();
-    const currentMonth = today.getMonth() + 1;
+    const currentMonth = today.getMonth(); // 0-based
     const currentYear = today.getFullYear();
 
     const recentSessions: any[] = [];
@@ -233,51 +200,38 @@ export async function getSessions(studentId: number) {
 
     for (const session of allSessions) {
       try {
-        // Add formatted time
-        const timeId = session.TimeID;
-        const formattedTime = timeId ? await getTime(timeId) : "Unknown";
+        const formattedTime = session.TimeID ? await getTime(session.TimeID) : "Unknown";
         session.Time = formattedTime;
 
-        // Normalize ScheduleDate with better logging
         let sessionDate: Date | null = null;
+        const raw = session.ScheduleDate;
 
-        if (session.ScheduleDate) {
-          if (session.ScheduleDate instanceof Date) {
-            sessionDate = session.ScheduleDate;
-          } else if (typeof session.ScheduleDate === "string") {
-            sessionDate = new Date(session.ScheduleDate);
-          } else {
-            // Handle other types - convert to string first
-            sessionDate = new Date(session.ScheduleDate.toString());
-          }
+        if (raw instanceof Date) {
+          sessionDate = raw;
+        } else if (typeof raw === "string") {
+          const d = new Date(raw);
+          sessionDate = isNaN(d.getTime()) ? null : d;
+        } else if (raw != null) {
+          const d = new Date(String(raw));
+          sessionDate = isNaN(d.getTime()) ? null : d;
         }
 
-        if (!sessionDate || isNaN(sessionDate.getTime())) {
+        if (!sessionDate) continue;
+
+        if (sessionDate.getMonth() !== currentMonth || sessionDate.getFullYear() !== currentYear) {
           continue;
         }
 
-        // Filter only current month & year
-        if (
-          sessionDate.getMonth() + 1 !== currentMonth ||
-          sessionDate.getFullYear() !== currentYear
-        ) {
-          continue;
-        }
-
-        // Save formatted date and day - using proper date formatting
         session.FormattedDate = sessionDate.toLocaleDateString("en-US", {
           weekday: "long",
-          year: "numeric", 
+          year: "numeric",
           month: "long",
-          day: "numeric"
+          day: "numeric",
         });
-        if (!session.Day || session.Day.trim() === "") {
-          session.Day = sessionDate.toLocaleDateString("en-US", {
-            weekday: "long",
-          });
+        if (!session.Day || String(session.Day).trim() === "") {
+          session.Day = sessionDate.toLocaleDateString("en-US", { weekday: "long" });
         }
 
-        // Categorize
         if (sessionDate < today) {
           session.category = "recent";
           recentSessions.push(session);
@@ -285,14 +239,13 @@ export async function getSessions(studentId: number) {
           session.category = "upcoming";
           upcomingSessions.push(session);
         }
-      } catch (error) {
-        console.error("Error processing session:", error);
+      } catch (e) {
+        console.error("Error processing session:", e);
         session.category = "upcoming";
         upcomingSessions.push(session);
       }
     }
 
-    // Combine and return
     return [...recentSessions, ...upcomingSessions];
   } catch (error) {
     console.error("Error getting sessions:", error);
@@ -300,47 +253,38 @@ export async function getSessions(studentId: number) {
   }
 }
 
+/** High-level search: parent by email+phone → students → sessions & balance */
 export async function searchStudent(email: string, contactNum: string) {
   try {
-    // Step 1: Lookup parent/inquiry info using email and contact number
     const inquiry = await findInquiryByEmailAndPhone(email, contactNum);
-    if (!inquiry) {
-      return { error: "Parent not found" };
-    }
+    if (!inquiry) return { error: "Parent not found" };
 
-    const inquiryId = inquiry.inquiry.InquiryID;
+    const inquiryId = inquiry.inquiry.InquiryID as number;
 
-    // Step 2: Get all students tied to this parent (InquiryID)
-    const request = pool.request();
-    request.input("inquiryId", sql.Int, inquiryId);
+    const pool = await getPool();
+    const req = pool.request();
+    req.input("inquiryId", sql.Int, inquiryId);
 
-    const query = `
+    const studentQuery = `
       SELECT ID, FirstName, LastName 
       FROM tblstudents 
       WHERE InquiryID = @inquiryId
     `;
+    const studentsRs = await req.query(studentQuery);
+    const students = studentsRs.recordset;
+    if (students.length === 0) return { error: "No students found for this parent" };
 
-    const result = await request.query(query);
-    const students = result.recordset;
-
-    if (students.length === 0) {
-      return { error: "No students found for this parent" };
-    }
-
-    // Step 3: Get parent balance info
     const parentInfo = await getHoursBalance(inquiryId);
 
-    // Step 4: Attach session data for each student
-    for (const student of students) {
-      const studentId = student.ID;
-      student.sessions = await getSessions(studentId);
+    for (const s of students) {
+      s.sessions = await getSessions(s.ID);
     }
 
     return {
       success: true,
       inquiry_id: inquiryId,
       parent: parentInfo,
-      students: students,
+      students,
     };
   } catch (error) {
     console.error("Error searching student:", error);
@@ -348,6 +292,7 @@ export async function searchStudent(email: string, contactNum: string) {
   }
 }
 
+/** Accept a schedule change request (no DB writes yet) */
 export async function submitScheduleChangeRequest(requestData: {
   studentId: number;
   currentSession: string;
@@ -357,11 +302,7 @@ export async function submitScheduleChangeRequest(requestData: {
   reason?: string;
 }) {
   try {
-    // For now, we'll just log the request since the original system doesn't have a specific table for this
-    // In a real implementation, you might want to create a new table or use an existing one
     console.log("Schedule change request submitted:", requestData);
-
-    // You could insert into a requests table or send an email notification here
     return {
       success: true,
       message: `Schedule change request submitted for student ${requestData.studentId}`,
