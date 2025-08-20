@@ -1,3 +1,13 @@
+
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, ".env") }); // loads server/.env
+
+
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -61,11 +71,15 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+
+  // Windows (win32) does NOT support reusePort, so only apply on Linux/Unix
+  const listenOpts: any = { port, host: "0.0.0.0" };
+  if (process.platform !== "win32") {
+    listenOpts.reusePort = true;
+  }
+
+  server.listen(listenOpts, () => {
     log(`serving on port ${port}`);
   });
 })();
+
