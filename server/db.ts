@@ -43,7 +43,7 @@ function parseServer(serverRaw: string) {
 }
 
 // Required envs
-const SERVER_RAW = requireEnv('CRMSrvAddress'); // e.g. 10.1.2.3,1433 or HOST\INSTANCE
+const SERVER_RAW = requireEnv('CRMSrvAddress'); 
 const DB_NAME    = requireEnv('CRMSrvDb');
 const DB_USER    = requireEnv('CRMSrvUs');
 const DB_PASS    = requireEnv('CRMSrvPs');

@@ -1,4 +1,4 @@
-// server/utils/normalize.ts
+// server/normalize.ts
 export function normalizeUnicode(input: string): string {
   return input.normalize('NFKC').trim();
 }
