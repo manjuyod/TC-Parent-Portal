@@ -108,10 +108,14 @@ export function invalidateLoginCache(email: string, contactNum: string) {
 }
 
 /* ======================================================================== */
-/* Change: One-round-trip login lookup (parent + students)                */
+/* One-round-trip login lookup (parent + students + franchise email)         */
+/*  - Auto-refresh cache if CenterEmail is missing in cached payload         */
 /* ======================================================================== */
-/** Find Inquiry (parent) by email + phone and list linked students */
-export async function findInquiryByEmailAndPhone(email: string, contactNum: string) {
+export async function findInquiryByEmailAndPhone(
+  email: string,
+  contactNum: string,
+  forceFresh = false
+) {
   try {
     const phone10 = normalizePhone10(contactNum);
     if (!phone10) return null;
@@ -119,11 +123,24 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
     const emailKey = String(email || "").trim().toLowerCase();
     const cacheKey = `${emailKey}|${phone10}`;
 
-    // Try cache first (fast path)
-    const cached = LOGIN_CACHE.get(cacheKey);
-    if (cached) return cached;
+    // Try cache (unless forceFresh)
+    if (!forceFresh) {
+      const cached = LOGIN_CACHE.get(cacheKey);
+      if (cached) {
+        const missingCenter = cached.students.some(
+          (s: any) => s.CenterEmail == null || String(s.CenterEmail).trim() === ""
+        );
+        if (!missingCenter) {
+          return cached;
+        }
+        // fall through to re-query if missing CenterEmail
+      }
+    }
 
-    // Single DB round-trip: resolve InquiryID, then parent + students as separate recordsets
+    // Single DB round-trip:
+    //   1) Resolve InquiryID
+    //   2) Recordset 0: parent
+    //   3) Recordset 1: students + FranchiseID + FranchiesEmail AS CenterEmail
     const pool = await getPool();
     const req = pool.request();
     req.input("email", sql.VarChar(256), email);
@@ -142,11 +159,18 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
       FROM dbo.tblInquiry
       WHERE ID = @inqId;
 
-      -- Recordset 1: students
-      SELECT ID, FirstName, LastName
-      FROM dbo.tblstudents
-      WHERE InquiryID = @inqId
-      ORDER BY LastName, FirstName;
+      -- Recordset 1: students (with franchise email)
+      SELECT
+        s.ID,
+        s.FirstName,
+        s.LastName,
+        s.FranchiseID,
+        f.FranchiesEmail AS CenterEmail
+      FROM dbo.tblstudents AS s
+      LEFT JOIN dbo.tblFranchies AS f
+        ON f.ID = s.FranchiseID
+      WHERE s.InquiryID = @inqId
+      ORDER BY s.LastName, s.FirstName;
     `);
 
     const parent = result.recordsets?.[0]?.[0];
@@ -155,7 +179,7 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
     const students = result.recordsets?.[1] ?? [];
     const value: LoginCacheValue = { inquiry: parent, students };
 
-    // Store in cache and return
+    // Cache and return
     LOGIN_CACHE.set(cacheKey, value);
     return value;
   } catch (error) {
@@ -166,7 +190,7 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
 
 /* ======================================================================== */
 /* Sessions (today → fallback ALL)                                           */
-/* (Kept for compat; formats Time via getTimeLabel() to avoid TZ drift.)     */
+/* (Formats Time via getTimeLabel() to avoid TZ drift.)                      */
 /* ======================================================================== */
 export async function getSessions(studentId: number | string) {
   try {
@@ -357,7 +381,7 @@ export async function submitScheduleChangeRequest(requestData: {
 }
 
 /* ======================================================================== */
-/* Month-range Sessions (date-only, stable labels)                            */
+/* Month-range Sessions (date-only, stable labels)                           */
 /* ======================================================================== */
 
 function monthRangeUTC(year: number, month1to12: number) {
