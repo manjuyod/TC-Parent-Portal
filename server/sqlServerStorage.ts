@@ -1,40 +1,7 @@
 // server/sqlServerStorage.ts
 import { getPool, sql } from "./db";
 
-/* ======================================================================== */
-/* Generic TTL cache (in-memory, process-local)                              */
-/* ======================================================================== */
-class TTLCache<K, V> {
-  private map = new Map<K, { value: V; expires: number }>();
-  constructor(private ttlMs: number, private maxEntries = 500) {}
-  get(key: K): V | undefined {
-    const e = this.map.get(key);
-    if (!e) return undefined;
-    if (Date.now() > e.expires) {
-      this.map.delete(key);
-      return undefined;
-    }
-    // LRU refresh
-    this.map.delete(key);
-    this.map.set(key, e);
-    return e.value;
-  }
-  set(key: K, value: V) {
-    const entry = { value, expires: Date.now() + this.ttlMs };
-    if (this.map.has(key)) this.map.delete(key);
-    this.map.set(key, entry);
-    if (this.map.size > this.maxEntries) {
-      const oldestKey = this.map.keys().next().value;
-      this.map.delete(oldestKey);
-    }
-  }
-  delete(key: K) { this.map.delete(key); }
-  clear() { this.map.clear(); }
-}
-
-/* ======================================================================== */
-/* Helpers                                                                   */
-/* ======================================================================== */
+/* ------------------------ Helpers ------------------------ */
 
 function normalizePhone10(input: string): string | null {
   const digits = String(input || "").replace(/\D/g, "");
@@ -48,104 +15,19 @@ function coerceInt(v: number | string): number {
   return n;
 }
 
-/* ======================================================================== */
-/* Smart caches                                                              */
-/* ======================================================================== */
-
-// Cache for login lookups: key = `${emailLower}|${phone10}`
-type LoginCacheValue = { inquiry: any; students: any[] };
-const LOGIN_CACHE = new TTLCache<string, LoginCacheValue>(15 * 60 * 1000, 1000); // 15m
-
-// Time label cache (TimeID -> "h:mm AM/PM"). tblTimes changes rarely.
-const TIME_LABEL_CACHE = new TTLCache<number, string | null>(24 * 60 * 60 * 1000, 256); // 24h
-
-/* ======================================================================== */
-/* Python-style get_time: fetch HH:mm:ss and format to 'h:mm AM/PM'          */
-/* ======================================================================== */
-async function getTimeLabel(timeId: number): Promise<string | null> {
-  const cached = TIME_LABEL_CACHE.get(timeId);
-  if (cached !== undefined) return cached; // return cached (even null)
-
-  const pool = await getPool();
-  const req = pool.request();
-  req.input("tid", sql.Int, timeId);
-
-  const result = await req.query(`
-    SELECT CONVERT(varchar(8), CAST([Time] AS time), 108) AS TimeHHMM
-    FROM dpinkney_TC.dbo.tblTimes
-    WHERE ID = @tid
-  `);
-
-  let formatted: string | null = null;
-  if (result.recordset.length) {
-    const hhmm = result.recordset[0].TimeHHMM as string; // "13:00:00"
-    const m = hhmm.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (m) {
-      const h = parseInt(m[1], 10);
-      const mins = parseInt(m[2], 10);
-      const tmp = new Date();
-      tmp.setHours(h, mins, 0, 0);
-      formatted = tmp.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }); // "1:00 PM"
-    } else {
-      formatted = hhmm;
-    }
-  }
-
-  TIME_LABEL_CACHE.set(timeId, formatted);
-  return formatted;
-}
-
-/* Optional: manual login cache invalidation */
-export function invalidateLoginCache(email: string, contactNum: string) {
-  const phone10 = normalizePhone10(contactNum);
-  if (!phone10) return;
-  const key = `${String(email || "").trim().toLowerCase()}|${phone10}`;
-  LOGIN_CACHE.delete(key);
-}
-
-/* ======================================================================== */
-/* One-round-trip login lookup (parent + students + franchise email)         */
-/*  - Auto-refresh cache if CenterEmail is missing in cached payload         */
-/* ======================================================================== */
-export async function findInquiryByEmailAndPhone(
-  email: string,
-  contactNum: string,
-  forceFresh = false
-) {
+/* ------------------------ Login lookup (one round-trip) ------------------------ */
+/** Find Inquiry (parent) by email + phone and list linked students */
+export async function findInquiryByEmailAndPhone(email: string, contactNum: string) {
   try {
+    const pool = await getPool();
     const phone10 = normalizePhone10(contactNum);
     if (!phone10) return null;
 
-    const emailKey = String(email || "").trim().toLowerCase();
-    const cacheKey = `${emailKey}|${phone10}`;
-
-    // Try cache (unless forceFresh)
-    if (!forceFresh) {
-      const cached = LOGIN_CACHE.get(cacheKey);
-      if (cached) {
-        const missingCenter = cached.students.some(
-          (s: any) => s.CenterEmail == null || String(s.CenterEmail).trim() === ""
-        );
-        if (!missingCenter) {
-          return cached;
-        }
-        // fall through to re-query if missing CenterEmail
-      }
-    }
-
-    // Single DB round-trip:
-    //   1) Resolve InquiryID
-    //   2) Recordset 0: parent
-    //   3) Recordset 1: students + FranchiseID + FranchiesEmail AS CenterEmail
-    const pool = await getPool();
     const req = pool.request();
     req.input("email", sql.VarChar(256), email);
     req.input("cleanPhone", sql.VarChar(16), phone10);
 
+    // One round-trip, avoids per-param naming mismatches (@inqId vs @inqID, etc.)
     const result = await req.query(`
       DECLARE @inqId INT;
 
@@ -159,45 +41,30 @@ export async function findInquiryByEmailAndPhone(
       FROM dbo.tblInquiry
       WHERE ID = @inqId;
 
-      -- Recordset 1: students (with franchise email)
-      SELECT
-        s.ID,
-        s.FirstName,
-        s.LastName,
-        s.FranchiseID,
-        f.FranchiesEmail AS CenterEmail
-      FROM dbo.tblstudents AS s
-      LEFT JOIN dbo.tblFranchies AS f
-        ON f.ID = s.FranchiseID
-      WHERE s.InquiryID = @inqId
-      ORDER BY s.LastName, s.FirstName;
+      -- Recordset 1: students
+      SELECT ID, FirstName, LastName, FranchiseID
+      FROM dbo.tblStudents
+      WHERE InquiryID = @inqId
+      ORDER BY LastName, FirstName;
     `);
 
     const parent = result.recordsets?.[0]?.[0];
     if (!parent) return null;
 
     const students = result.recordsets?.[1] ?? [];
-    const value: LoginCacheValue = { inquiry: parent, students };
-
-    // Cache and return
-    LOGIN_CACHE.set(cacheKey, value);
-    return value;
+    return { inquiry: parent, students };
   } catch (error) {
-    console.error("Error finding inquiry by email/phone (single round-trip):", error);
+    console.error("Error finding inquiry by email/phone:", error);
     throw error;
   }
 }
 
-/* ======================================================================== */
-/* Sessions (today → fallback ALL)                                           */
-/* (Formats Time via getTimeLabel() to avoid TZ drift.)                      */
-/* ======================================================================== */
+/* ------------------------ Sessions (robust: today, then fallback) ------------------------ */
 export async function getSessions(studentId: number | string) {
   try {
     const sid = coerceInt(studentId);
     const pool = await getPool();
 
-    // 1) Today (per SQL Server time)
     const reqToday = pool.request();
     reqToday.input("sid", sql.Int, sid);
     const rsToday = await reqToday.query(`
@@ -205,16 +72,17 @@ export async function getSessions(studentId: number | string) {
         s.StudentId1       AS StudentID,
         s.ScheduleDate     AS ScheduleDate,
         s.Day              AS DayRaw,
-        s.TimeID
+        s.TimeID,
+        t.[Time]           AS TimeText
       FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+      LEFT JOIN dpinkney_TC.dbo.tblTimes AS t
+        ON t.ID = s.TimeID
       WHERE s.StudentId1 = @sid
         AND CAST(s.ScheduleDate AS date) = CAST(GETDATE() AS date)
       ORDER BY s.ScheduleDate ASC, s.TimeID ASC
     `);
 
-    let rows = rsToday.recordset as any[];
-
-    // 2) Fallback: ALL sessions
+    let rows = rsToday.recordset;
     if (!rows.length) {
       const reqAll = pool.request();
       reqAll.input("sid", sql.Int, sid);
@@ -223,22 +91,41 @@ export async function getSessions(studentId: number | string) {
           s.StudentId1       AS StudentID,
           s.ScheduleDate     AS ScheduleDate,
           s.Day              AS DayRaw,
-          s.TimeID
+          s.TimeID,
+          t.[Time]           AS TimeText
         FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+        LEFT JOIN dpinkney_TC.dbo.tblTimes AS t
+          ON t.ID = s.TimeID
         WHERE s.StudentId1 = @sid
         ORDER BY s.ScheduleDate ASC, s.TimeID ASC
       `);
-      rows = rsAll.recordset as any[];
+      rows = rsAll.recordset;
     }
 
     const now = new Date();
-
-    const mapped = await Promise.all(rows.map(async (row: any) => {
+    const mapped = rows.map((row: any) => {
       const d = row.ScheduleDate instanceof Date ? row.ScheduleDate : new Date(String(row.ScheduleDate));
       const day = (row.DayRaw && String(row.DayRaw).trim())
         ? row.DayRaw
         : (!isNaN(d.getTime()) ? d.toLocaleDateString("en-US", { weekday: "long" }) : null);
-      const timeStr = await getTimeLabel(Number(row.TimeID));
+
+      // Normalize 'Time' like "1:00 PM"
+      let timeStr: string | null = null;
+      const v = row.TimeText;
+      if (v instanceof Date) {
+        timeStr = v.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      } else if (typeof v === "string") {
+        const m = v.match(/^(\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?$/);
+        if (m) {
+          const tmp = new Date(); tmp.setHours(parseInt(m[1], 10), parseInt(m[2], 10), 0, 0);
+          timeStr = tmp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+        } else {
+          const tmp = new Date(`1970-01-01T${v}`);
+          if (!isNaN(tmp.getTime())) {
+            timeStr = tmp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+          }
+        }
+      }
 
       return {
         StudentID: row.StudentID,
@@ -256,7 +143,7 @@ export async function getSessions(studentId: number | string) {
             })
           : null,
       };
-    }));
+    });
 
     return mapped;
   } catch (error) {
@@ -265,15 +152,13 @@ export async function getSessions(studentId: number | string) {
   }
 }
 
-/* ======================================================================== */
-/* Billing (stored procedure)                                                */
-/* ======================================================================== */
+/* ------------------------ Billing (stored procedure) ------------------------ */
 export async function getHoursBalance(inquiryId: number | string) {
   try {
     const idNum = coerceInt(inquiryId);
     const pool = await getPool();
     const request = pool.request();
-    request.input("inqID", sql.Int, idNum);
+    request.input("inqID", sql.Int, idNum); // matches proc param name (@inqID)
 
     try {
       const result = await request.execute("dpinkney_TC.dbo.USP_Report_AccountBalance");
@@ -332,9 +217,7 @@ export async function getHoursBalance(inquiryId: number | string) {
   }
 }
 
-/* ======================================================================== */
-/* High-level search (compat)                                                */
-/* ======================================================================== */
+/* ------------------------ High-level search (compat) ------------------------ */
 export async function searchStudent(email: string, contactNum: string) {
   try {
     const inquiry = await findInquiryByEmailAndPhone(email, contactNum);
@@ -356,9 +239,7 @@ export async function searchStudent(email: string, contactNum: string) {
   }
 }
 
-/* ======================================================================== */
-/* Schedule change (keep original stub)                                      */
-/* ======================================================================== */
+/* ------------------------ Schedule change (stub) ------------------------ */
 export async function submitScheduleChangeRequest(requestData: {
   studentId: number;
   currentSession: string;
@@ -380,70 +261,43 @@ export async function submitScheduleChangeRequest(requestData: {
   }
 }
 
-/* ======================================================================== */
-/* Month-range Sessions (date-only, stable labels)                           */
-/* ======================================================================== */
-
-function monthRangeUTC(year: number, month1to12: number) {
-  const m = Math.min(12, Math.max(1, month1to12));
-  const start = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999)); // last day of month
-  const toISODate = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
-  return { startISO: toISODate(start), endISO: toISODate(end) };
-}
-
+/* ------------------------ Admin login (DB-backed) ------------------------ */
 /**
- * Fetch ALL sessions for a student in (year, month).
- * Pure DATE filtering in SQL; formats Time via getTimeLabel() + cache.
+ * Verifies admin by email + password against SQL Server (dbo.tblUsers).
+ * Then resolves franchise by matching that email to dpinkney_TC.dbo.tblFranchies.FranchiesEmail.
+ *
+ * Returns { franchiseId, email } on success, or null on failure.
  */
-export async function getSessionsForMonth(studentId: number | string, year: number, month1to12: number) {
-  const sid = coerceInt(studentId);
-  const y = coerceInt(year);
-  const m = coerceInt(month1to12);
-  const { startISO, endISO } = monthRangeUTC(y, m);
+export async function verifyAdminCredentials(
+  email: string,
+  password: string
+): Promise<{ franchiseId: string; email: string } | null> {
+  const pool = await getPool();
+  const req = pool.request();
+  req.input("email", sql.VarChar(256), email);
+  req.input("pwd", sql.VarChar(256), password);
 
-  try {
-    const pool = await getPool();
-    const req = pool.request();
-    req.input("sid", sql.Int, sid);
-    req.input("d1", sql.Date, startISO);
-    req.input("d2", sql.Date, endISO);
+  const rs = await req.query(`
+    SELECT TOP 1
+      U.[email]           AS Email,
+      F.[ID]              AS FranchiseID
+    FROM dbo.tblUsers AS U
+    LEFT JOIN dpinkney_TC.dbo.tblFranchies AS F
+      ON F.[FranchiesEmail] = U.[email] COLLATE SQL_Latin1_General_CP1_CI_AS
+    WHERE U.[email] = @email COLLATE SQL_Latin1_General_CP1_CI_AS
+      AND U.[Password] = @pwd
+  `);
 
-    const rs = await req.query(`
-      SELECT
-        s.StudentId1                       AS StudentID,
-        CAST(s.ScheduleDate AS date)       AS ScheduleDateDate,
-        CONVERT(varchar(10), CAST(s.ScheduleDate AS date), 23) AS ScheduleDateISO,
-        s.Day                              AS DayRaw,
-        s.TimeID
-      FROM dpinkney_TC.dbo.tblSessionSchedule AS s
-      WHERE s.StudentId1 = @sid
-        AND CAST(s.ScheduleDate AS date) BETWEEN @d1 AND @d2
-      ORDER BY CAST(s.ScheduleDate AS date) ASC, s.TimeID ASC
-   `);
-
-    const rows = rs.recordset as any[];
-    const mapped = await Promise.all(rows.map(async (row: any) => {
-      const dateISO = String(row.ScheduleDateISO);      // 'YYYY-MM-DD'
-      const dateObj = new Date(`${dateISO}T00:00:00`);
-      const day = (row.DayRaw && String(row.DayRaw).trim())
-        ? row.DayRaw
-        : dateObj.toLocaleDateString("en-US", { weekday: "long" });
-      const timeLabel = await getTimeLabel(Number(row.TimeID));
-
-      return {
-        StudentID: row.StudentID,
-        ScheduleDate: dateObj,        // keep for compat
-        ScheduleDateISO: dateISO,     // stable, no TZ drift
-        Day: day ?? null,
-        TimeID: row.TimeID,
-        Time: timeLabel ?? "Unknown",
-      };
-    }));
-
-    return mapped;
-  } catch (error) {
-    console.error("Error getSessionsForMonth:", error);
-    return [];
+  if (!rs.recordset.length) {
+    return null;
   }
+
+  const row = rs.recordset[0];
+  const fid = row.FranchiseID != null ? String(row.FranchiseID) : null;
+  if (!fid) return null;
+
+  return {
+    franchiseId: fid,
+    email: String(row.Email),
+  };
 }
