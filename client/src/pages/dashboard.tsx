@@ -1,5 +1,6 @@
+// client/src/pages/dashboard.tsx
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
 import billingIconPath from "@assets/tcBillingIcon_1755332058201.png";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
@@ -7,9 +8,6 @@ import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState(""); // used for Home/Schedule lists
   const [activeTab, setActiveTab] = useState<"home" | "schedule" | "billing">("home");
-
-  // Billing range (dropdown)
-  const [billingRange, setBillingRange] = useState<"this_month" | "last_3" | "ytd" | "all">("this_month");
 
   // --- Schedule-change controlled state ---
   const [reqStudentId, setReqStudentId] = useState<number | null>(null);
@@ -20,11 +18,61 @@ export default function Dashboard() {
   const [reqChange, setReqChange] = useState("");
   const [reqReason, setReqReason] = useState("");
 
-  // Queries (hooks at top)
   const { data: user } = useQuery({ queryKey: ["/api/auth/me"] });
   const { data: dashboardData } = useQuery({ queryKey: ["/api/dashboard"], enabled: !!user });
 
-  // ---------------- Billing helpers (no hooks below) ----------------
+  // Live hide/blur flag — seeded from server, then updated via WebSocket pushes
+  const [hideBillingLive, setHideBillingLive] = useState<boolean>(!!dashboardData?.uiPolicy?.hideBilling);
+  useEffect(() => {
+    setHideBillingLive(!!dashboardData?.uiPolicy?.hideBilling);
+  }, [dashboardData?.uiPolicy?.hideBilling]);
+
+  // WebSocket connection for instant policy updates
+  const wsRef = useRef<WebSocket | null>(null);
+  useEffect(() => {
+    if (!user) return;
+
+    let stopped = false;
+    const connect = () => {
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      const url = `${proto}://${window.location.host}/ws`;
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        // no-op; session cookie authenticates
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string);
+          if (msg?.type === "policy") {
+            setHideBillingLive(!!msg.hideBilling);
+          }
+        } catch {}
+      };
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (!stopped) {
+          // quick retry
+          setTimeout(connect, 1000);
+        }
+      };
+      ws.onerror = () => {
+        // let onclose handle retry
+      };
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      try {
+        wsRef.current?.close();
+      } catch {}
+      wsRef.current = null;
+    };
+  }, [user]);
+
+  // ---------------- Billing helpers (last 30 days) ----------------
   const billingRows: any[] = dashboardData?.billing?.account_details ?? [];
 
   const getRowDate = (row: any): Date | null => {
@@ -39,36 +87,24 @@ export default function Dashboard() {
     return isNaN(d.getTime()) ? null : d;
   };
 
-  const filteredBillingRows = (() => {
+  const last30Rows = useMemo(() => {
     const rows = billingRows ?? [];
     if (!rows.length) return [];
 
     const now = new Date();
-    const startOf = (y: number, m: number, d = 1) => new Date(y, m, d, 0, 0, 0, 0);
-    const firstOfThisMonth = startOf(now.getFullYear(), now.getMonth(), 1);
-    const firstOfYear = startOf(now.getFullYear(), 0, 1);
-    const firstOf3MonthsAgo = startOf(now.getFullYear(), now.getMonth() - 2, 1);
-
-    const inRange = (dt: Date | null) => {
-      if (!dt) return false;
-      switch (billingRange) {
-        case "this_month": return dt >= firstOfThisMonth;
-        case "last_3":     return dt >= firstOf3MonthsAgo;
-        case "ytd":        return dt >= firstOfYear;
-        case "all":        return true;
-        default:           return true;
-      }
-    };
+    const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     return [...rows]
-      .filter((r) => inRange(getRowDate(r)))
+      .filter((r) => {
+        const d = getRowDate(r);
+        return d && d >= cutoff;
+      })
       .sort((a, b) => {
         const da = getRowDate(a)?.getTime() ?? 0;
         const db = getRowDate(b)?.getTime() ?? 0;
         return db - da; // newest first
       });
-  })();
-  // -------------------------------------------------------------------
+  }, [billingRows]);
 
   // Early loading return AFTER hooks/top setup
   if (!user || !dashboardData) {
@@ -134,7 +170,6 @@ export default function Dashboard() {
   }
 
   async function resolveCenterEmail(): Promise<string> {
-    // Prefer email already provided with the student object from /api/*
     if (reqStudentId != null) {
       const s = students.find((x: any) => x.id === reqStudentId);
       if (s?.centerEmail) return String(s.centerEmail);
@@ -146,7 +181,7 @@ export default function Dashboard() {
         }
       } catch {}
     }
-    return "center@example.com"; // last resort fallback
+    return "center@example.com";
   }
 
   function openGmailCompose(to: string) {
@@ -166,7 +201,7 @@ export default function Dashboard() {
   function openMailto(to: string) {
     const { subjectEnc, bodyEnc } = buildEmailParts();
     const mailto = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
-    window.location.href = mailto; // triggers OS app chooser on Android/iOS
+    window.location.href = mailto; // triggers OS chooser on Android/iOS
   }
 
   async function handleScheduleSubmit() {
@@ -180,7 +215,7 @@ export default function Dashboard() {
     else openGmailCompose(to);
   }
 
-  // ---------------- Tabs ----------------
+  /* ========================= SCHEDULE TAB ========================= */
   if (activeTab === "schedule") {
     return (
       <div>
@@ -374,7 +409,10 @@ export default function Dashboard() {
     );
   }
 
+  /* ========================= BILLING TAB ========================= */
   if (activeTab === "billing") {
+    const hideBilling = !!hideBillingLive; // live flag
+
     return (
       <div>
         {/* Header Section */}
@@ -420,138 +458,146 @@ export default function Dashboard() {
             </li>
           </ul>
 
-          {/* Account Balance Report */}
-          <div className="card mb-4">
-            <div className="card-header">
-              <h5 style={{ color: "white", margin: 0 }}>Account Balance Report</h5>
-            </div>
-            <div className="card-body">
-              <div className="table-container">
-                <table className="table table-striped table-sm">
-                  <thead>
-                    <tr>
-                      <th>Account Holder</th>
-                      <th>Students</th>
-                      <th>Hours Remaining</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {billing?.extra && billing.extra.length > 0 ? (
-                      billing.extra.map((account: any, index: number) => (
-                        <tr key={index}>
-                          <td>{account.AccountHolder || "N/A"}</td>
-                          <td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
-                          <td>{billing?.remaining_hours?.toFixed(1) || "0.0"} hours</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={3} className="text-center text-muted">No account information available</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          {/* Account Details + range dropdown */}
-          {billing?.account_details && billing.account_details.length > 0 && (
-            <div className="card mb-4">
-              <div className="card-header d-flex justify-content-between align-items-center">
-                <h5 style={{ color: "white", margin: 0 }}>Account Details</h5>
-
-                <div className="d-flex align-items-center">
-                  <label className="me-2 mb-0 small text-light">Show</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={billingRange}
-                    onChange={(e) => setBillingRange(e.target.value as typeof billingRange)}
-                    style={{ width: 180 }}
-                  >
-                    <option value="this_month">This month</option>
-                    <option value="last_3">Last 3 months</option>
-                    <option value="ytd">Year to date</option>
-                    <option value="all">All</option>
-                  </select>
+          {/* Entire billing content wrapped for blur/overlay */}
+          <div className="position-relative">
+            {/* Blurred content */}
+            <div style={hideBilling ? { filter: "blur(6px)", pointerEvents: "none", userSelect: "none" } : undefined}>
+              {/* Account Balance Report */}
+              <div className="card mb-4">
+                <div className="card-header">
+                  <h5 style={{ color: "white", margin: 0 }}>Account Balance Report</h5>
                 </div>
-              </div>
-
-              <div className="card-body">
-                <div className="d-flex justify-content-between align-items-center mb-2">
-                  <small className="text-muted">
-                    Showing {filteredBillingRows.length} of {billing.account_details.length} records
-                  </small>
-                  {typeof billing?.remaining_hours === "number" && (
-                    <small className="text-muted">
-                      Remaining Hours: {billing.remaining_hours.toFixed(1)}
-                    </small>
-                  )}
-                </div>
-
-                <div className="table-container">
-                  <table className="table table-striped table-sm">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 130 }}>Date</th>
-                        <th>Student</th>
-                        <th>Event Type</th>
-                        <th>Attendance</th>
-                        <th className="text-end" style={{ width: 110 }}>Adjustment</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredBillingRows.length ? (
-                        filteredBillingRows.map((detail: any, index: number) => {
-                          const dt = getRowDate(detail);
-                          const dateLabel =
-                            dt && !isNaN(dt.getTime())
-                              ? dt.toLocaleDateString("en-US", {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "numeric",
-                                })
-                              : detail.FormattedDate || "N/A";
-
-                          const adjNum = Number(detail.Adjustment ?? 0);
-                          const adjClass =
-                            Number.isFinite(adjNum) && adjNum !== 0
-                              ? adjNum > 0
-                                ? "text-success"
-                                : "text-danger"
-                              : "";
-
-                          return (
-                            <tr key={index}>
-                              <td>{dateLabel}</td>
-                              <td>{detail.Student || "N/A"}</td>
-                              <td>{detail.EventType || "N/A"}</td>
-                              <td>{detail.Attendance || "N/A"}</td>
-                              <td className={`text-end ${adjClass}`}>
-                                {Number.isFinite(adjNum)
-                                  ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
-                                  : String(detail.Adjustment ?? 0)}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
+                <div className="card-body">
+                  <div className="table-container">
+                    <table className="table table-striped table-sm">
+                      <thead>
                         <tr>
-                          <td colSpan={5} className="text-center text-muted">No records in this range.</td>
+                          <th>Account Holder</th>
+                          <th>Students</th>
+                          <th>Hours Remaining</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {billing?.extra && billing.extra.length > 0 ? (
+                          billing.extra.map((account: any, index: number) => (
+                            <tr key={index}>
+                              <td>{account.AccountHolder || "N/A"}</td>
+                              <td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
+                              <td>{typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={3} className="text-center text-muted">No account information available</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
+
+              {/* Account Details - LAST 30 DAYS ONLY */}
+              {last30Rows.length > 0 && (
+                <div className="card mb-4">
+                  <div className="card-header d-flex justify-content-between align-items-center">
+                    <h5 style={{ color: "white", margin: 0 }}>Account Details (Last 30 Days)</h5>
+                    {typeof billing?.remaining_hours === "number" && (
+                      <small className="text-light">Remaining Hours: {billing.remaining_hours.toFixed(1)}</small>
+                    )}
+                  </div>
+
+                  <div className="card-body">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <small className="text-muted">
+                        Showing {last30Rows.length} {last30Rows.length === 1 ? "record" : "records"}
+                      </small>
+                    </div>
+
+                    <div className="table-container">
+                      <table className="table table-striped table-sm">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 130 }}>Date</th>
+                            <th>Student</th>
+                            <th>Event Type</th>
+                            <th>Attendance</th>
+                            <th className="text-end" style={{ width: 110 }}>Adjustment</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {last30Rows.map((detail: any, index: number) => {
+                            const dt = getRowDate(detail);
+                            const dateLabel =
+                              dt && !isNaN(dt.getTime())
+                                ? dt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+                                : detail.FormattedDate || "N/A";
+
+                            const adjNum = Number(detail.Adjustment ?? 0);
+                            const adjClass =
+                              Number.isFinite(adjNum) && adjNum !== 0
+                                ? adjNum > 0
+                                  ? "text-success"
+                                  : "text-danger"
+                                : "";
+
+                            return (
+                              <tr key={index}>
+                                <td>{dateLabel}</td>
+                                <td>{detail.Student || "N/A"}</td>
+                                <td>{detail.EventType || "N/A"}</td>
+                                <td>{detail.Attendance || "N/A"}</td>
+                                <td className={`text-end ${adjClass}`}>
+                                  {Number.isFinite(adjNum)
+                                    ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
+                                    : String(detail.Adjustment ?? 0)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {last30Rows.length === 0 && (
+                <div className="card mb-4">
+                  <div className="card-body text-center text-muted">
+                    No billing records in the last 30 days.
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Overlay when hidden */}
+            {hideBilling && (
+              <div
+                className="d-flex align-items-center justify-content-center text-center"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  padding: "1rem",
+                  background: "rgba(255,255,255,0.65)",
+                  backdropFilter: "saturate(120%) blur(2px)",
+                }}
+              >
+                <div className="card shadow-sm" style={{ maxWidth: 520 }}>
+                  <div className="card-body">
+                    <h5 className="mb-2">Billing information is restricted</h5>
+                    <p className="mb-0 text-muted">Please contact your center for access.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  // ---------------- Home Tab (default) ----------------
+  /* ========================= HOME TAB (default) ========================= */
   return (
     <div>
       {/* Header Section */}
@@ -640,7 +686,7 @@ export default function Dashboard() {
                 <div>
                   <p className="text-muted mb-1 small text-uppercase">Account Balance</p>
                   <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
-                    {billing?.remaining_hours?.toFixed(1) || "0.0"} hours
+                    {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
                   </h4>
                   <p className="text-muted small mb-0">Hours remaining - Click to view billing details</p>
                 </div>
@@ -771,8 +817,8 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </div>
-      </div>      
+        </div>      
+      </div>
     </div>
   );
 }
