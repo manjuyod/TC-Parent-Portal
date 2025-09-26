@@ -49,14 +49,14 @@ declare module "express-session" {
 /* JSON shape:
    {
      "franchises": {
-       "6": { "hideBilling": true, "admins": ["EMAIL"] },
-       "8": { "hideBilling": false, "admins": [] }
+       "6": { "hideBilling": true },
+       "8": { "hideBilling": false }
      }
    }
 */
 /* ------------------------------------------------------------------ */
 
-type FranchiseFlagsRecord = Record<string, { hideBilling?: boolean; admins?: string[] }>;
+type FranchiseFlagsRecord = Record<string, { hideBilling?: boolean }>;
 
 async function ensureFlagsFile() {
   await fs.mkdir(FLAGS_DIR, { recursive: true });
@@ -82,10 +82,7 @@ async function readFlags(): Promise<FranchiseFlagsRecord> {
   return {};
 }
 
-async function writeFlags(
-  franchiseId: string,
-  patch: { hideBilling?: boolean; admins?: string[] }
-) {
+async function writeFlags(franchiseId: string, patch: { hideBilling?: boolean }) {
   await ensureFlagsFile();
   let root: { franchises: FranchiseFlagsRecord } = { franchises: {} };
   try {
@@ -101,7 +98,6 @@ async function writeFlags(
   root.franchises[franchiseId] = {
     ...cur,
     ...(patch.hideBilling !== undefined ? { hideBilling: !!patch.hideBilling } : {}),
-    ...(patch.admins ? { admins: patch.admins } : {}),
   };
   await fs.writeFile(FLAGS_FILE, JSON.stringify(root, null, 2), "utf-8");
 }
@@ -132,7 +128,7 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
   const q = pool.request();
   q.input("sid", sql.Int, studentId);
 
-  // NOTE: dpinkney_TC.dbo.tblFranchies with column FranchiesEmail (spelling as provided)
+  // NOTE: table name is dpinkney_TC.dbo.tblFranchies with column FranchiesEmail (as provided)
   const rs = await q.query(`
     SELECT TOP 1 F.FranchiesEmail AS CenterEmail
     FROM dbo.tblstudents S
@@ -145,37 +141,6 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
     return email && String(email).trim() ? String(email).trim() : null;
   }
   return null;
-}
-
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-function parseRowDate(row: any): Date | null {
-  const raw =
-    row?.Date ??
-    row?.TransactionDate ??
-    row?.PostedDate ??
-    row?.FormattedDate ??
-    null;
-  if (!raw) return null;
-  const d = new Date(String(raw));
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function filterAccountDetailsLast30(details: any[]): any[] {
-  if (!Array.isArray(details) || !details.length) return [];
-  const now = new Date();
-  const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  return details
-    .filter((r) => {
-      const d = parseRowDate(r);
-      return d ? d >= cutoff : false;
-    })
-    .sort((a, b) => {
-      const da = parseRowDate(a)?.getTime() ?? 0;
-      const db = parseRowDate(b)?.getTime() ?? 0;
-      return db - da; // newest first
-    });
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,6 +233,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           subject: "N/A",
           status: "active",
           progress: 0,
+          // Optional: expose franchise id to client if needed elsewhere
           franchiseId: s.FranchiseID ?? null,
         })),
       });
@@ -296,7 +262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ---- Read feature flags and compute hideBilling for this parent ----
       let hideBillingForParent = false;
       try {
-        const flags = await readFlags(); // { [fid]: { hideBilling, admins } }
+        const flags = await readFlags(); // { [fid]: { hideBilling } }
         const franchiseIds = Array.from(
           new Set(
             (studentsInfo || [])
@@ -379,62 +345,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       });
 
-      // Billing (filter account_details to last 30 days)
+      // Billing (keep summary & remaining_hours; drop details when hidden)
       const billingInfo = await getHoursBalance(inquiryIdNum);
-      const sessionsThisMonth = sessionsOut.length;
 
-      const accountDetailsLast30 = filterAccountDetailsLast30(
-        billingInfo?.account_details ?? []
-      );
+      const billingOut = billingInfo
+        ? {
+            currentBalance: "0.00",
+            monthlyRate: "320.00",
+            nextPaymentDate: "N/A",
+            paymentMethod: "N/A",
+            sessionsThisMonth: sessionsOut.length,
+            balance: billingInfo.balance ?? {},
+            extra: billingInfo.extra ?? [],
+            remaining_hours: billingInfo.remaining_hours ?? 0,
+            account_details: hideBillingForParent ? [] : (billingInfo.account_details ?? []),
+          }
+        : null;
 
       res.json({
         students,
         sessions: sessionsOut,
-        billing: billingInfo
-          ? {
-              currentBalance: "0.00",
-              monthlyRate: "320.00",
-              nextPaymentDate: "N/A",
-              paymentMethod: "N/A",
-              sessionsThisMonth,
-              ...billingInfo,
-              account_details: accountDetailsLast30, // <= last 30 days only
-              policy: { hideBilling: hideBillingForParent }, // also surface here for convenience
-            }
-          : null,
+        billing: billingOut,
         transactions: [],
-        uiPolicy: { hideBilling: hideBillingForParent }, // main policy for the client
+        uiPolicy: { hideBilling: hideBillingForParent },
       });
     } catch (error) {
       console.error("Dashboard error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  /* ============================ Quick policy (for polling) ============================ */
-  // Client can poll this to reflect admin toggle quickly
-  app.get("/api/billing-policy", requireParentAuth, async (req, res) => {
-    try {
-      const contactPhone = req.session.contactPhone!;
-      const email = req.session.email!;
-      const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) return res.status(404).json({ message: "Parent not found" });
-
-      const studentsInfo = inquiryData.students || [];
-      const flags = await readFlags();
-      const franchiseIds = Array.from(
-        new Set(
-          (studentsInfo || [])
-            .map((s: any) => s?.FranchiseID)
-            .filter((v: any) => v !== null && v !== undefined)
-            .map((v: any) => String(v))
-        )
-      );
-      const hideBilling = franchiseIds.some((fid) => !!flags[fid]?.hideBilling);
-
-      res.json({ hideBilling });
-    } catch (e: any) {
-      console.error("billing-policy error:", e);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -537,10 +473,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
-  app.get("/api/admin/me", requireAdminAuth, async (_req, res) => {
+  app.get("/api/admin/me", requireAdminAuth, async (req, res) => {
     res.json({
-      email: _req.session.adminEmail!,
-      franchiseId: _req.session.adminFranchiseId!,
+      email: req.session.adminEmail!,
+      franchiseId: req.session.adminFranchiseId!,
     });
   });
 
@@ -550,8 +486,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const fid = String(req.session.adminFranchiseId!);
       const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false, admins: [] };
-      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling, admins: rec.admins || [] });
+      const rec = all[fid] || { hideBilling: false };
+      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to read flags" });
     }
@@ -569,25 +505,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       await writeFlags(fid, { hideBilling: !!hideBilling });
       const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false, admins: [] };
-      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling, admins: rec.admins || [] });
+      const rec = all[fid] || { hideBilling: false };
+      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to update flags" });
-    }
-  });
-
-  app.post("/api/admin/admins", requireAdminAuth, async (req, res) => {
-    try {
-      const fid = String(req.session.adminFranchiseId!);
-      const admins = Array.isArray(req.body?.admins)
-        ? req.body.admins.map((s: string) => String(s).trim()).filter(Boolean)
-        : [];
-      await writeFlags(fid, { admins });
-      const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false, admins: [] };
-      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling, admins: rec.admins || [] });
-    } catch (e: any) {
-      res.status(500).json({ message: e?.message || "Failed to update admins" });
     }
   });
 
