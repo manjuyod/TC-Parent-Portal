@@ -1,79 +1,131 @@
-// client/src/pages/dashboard.tsx
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
 import billingIconPath from "@assets/tcBillingIcon_1755332058201.png";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
 
-export default function Dashboard() {
-  const [selectedStudent, setSelectedStudent] = useState(""); // used for Home/Schedule lists
-  const [activeTab, setActiveTab] = useState<"home" | "schedule" | "billing">("home");
+type Tab = "home" | "schedule" | "billing";
 
-  // --- Schedule-change controlled state ---
+export default function Dashboard() {
+  const [selectedStudent, setSelectedStudent] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("home");
+
+  // --- Schedule-change form state ---
   const [reqStudentId, setReqStudentId] = useState<number | null>(null);
   const [reqStudent, setReqStudent] = useState("");
-  const [reqCurrent, setReqCurrent] = useState(""); // e.g., "Monday 3:00 PM"
-  const [reqDate, setReqDate] = useState("");       // "YYYY-MM-DD"
-  const [reqTime, setReqTime] = useState("");       // "HH:MM"
+  const [reqCurrent, setReqCurrent] = useState("");
+  const [reqDate, setReqDate] = useState("");
+  const [reqTime, setReqTime] = useState("");
   const [reqChange, setReqChange] = useState("");
   const [reqReason, setReqReason] = useState("");
 
+  // Data
   const { data: user } = useQuery({ queryKey: ["/api/auth/me"] });
   const { data: dashboardData } = useQuery({ queryKey: ["/api/dashboard"], enabled: !!user });
 
-  // Live hide/blur flag — seeded from server, then updated via WebSocket pushes
-  const [hideBillingLive, setHideBillingLive] = useState<boolean>(!!dashboardData?.uiPolicy?.hideBilling);
+  const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
+
+  // If someone somehow lands on 'billing' while hidden, bounce to home
   useEffect(() => {
-    setHideBillingLive(!!dashboardData?.uiPolicy?.hideBilling);
-  }, [dashboardData?.uiPolicy?.hideBilling]);
+    if (activeTab === "billing" && hideBilling) setActiveTab("home");
+  }, [activeTab, hideBilling]);
 
-  // WebSocket connection for instant policy updates
-  const wsRef = useRef<WebSocket | null>(null);
-  useEffect(() => {
-    if (!user) return;
+  // ===== Helpers =====
+  const parseDateOnly = (isoOrAny: string | Date | null | undefined): Date | null => {
+    if (!isoOrAny) return null;
+    if (typeof isoOrAny === "string") {
+      // if ISO with time, keep date portion; if already date-like, still works
+      const d = new Date(isoOrAny);
+      if (!isNaN(d.getTime())) {
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      }
+      // fallback: take first 10 as YYYY-MM-DD
+      const iso = isoOrAny.length >= 10 ? isoOrAny.slice(0, 10) : isoOrAny;
+      const d2 = new Date(`${iso}T00:00:00`);
+      return isNaN(d2.getTime()) ? null : d2;
+    }
+    if (isoOrAny instanceof Date) {
+      return new Date(isoOrAny.getFullYear(), isoOrAny.getMonth(), isoOrAny.getDate());
+    }
+    const d3 = new Date(String(isoOrAny));
+    return isNaN(d3.getTime()) ? null : new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
+  };
 
-    let stopped = false;
-    const connect = () => {
-      const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      const url = `${proto}://${window.location.host}/ws`;
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
 
-      ws.onopen = () => {
-        // no-op; session cookie authenticates
-      };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string);
-          if (msg?.type === "policy") {
-            setHideBillingLive(!!msg.hideBilling);
-          }
-        } catch {}
-      };
-      ws.onclose = () => {
-        wsRef.current = null;
-        if (!stopped) {
-          // quick retry
-          setTimeout(connect, 1000);
-        }
-      };
-      ws.onerror = () => {
-        // let onclose handle retry
-      };
-    };
+  const formatMonthDayYear = (d: Date | null) =>
+    d && !isNaN(d.getTime())
+      ? d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+      : "N/A";
 
-    connect();
-    return () => {
-      stopped = true;
-      try {
-        wsRef.current?.close();
-      } catch {}
-      wsRef.current = null;
-    };
-  }, [user]);
+  const students: any[] = dashboardData?.students ?? [];
+  const sessions: any[] = dashboardData?.sessions ?? [];
+  const billing = dashboardData?.billing;
 
-  // ---------------- Billing helpers (last 30 days) ----------------
-  const billingRows: any[] = dashboardData?.billing?.account_details ?? [];
+  // ----- Session parsing + sorting -----
+  const parseSessionDate = (s: any): Date | null => {
+    const iso: string | undefined = s?.ScheduleDateISO;
+    if (iso) return parseDateOnly(iso);
+    return parseDateOnly(s?.ScheduleDate);
+  };
+
+  // Build a sortable timestamp for sessions (date + TimeID fallback)
+  const sessionSortKey = (s: any): number => {
+    const d = parseSessionDate(s)?.getTime() ?? 0;
+    const tid = Number.isFinite(Number(s?.TimeID)) ? Number(s.TimeID) : 0;
+    return d * 1000 + tid; // composite for stable ordering
+  };
+
+  // ===== Sessions for selected student (used across Home/Schedule) =====
+  const sessionsForSelected: any[] = useMemo(() => {
+    if (!selectedStudent || !sessions.length) return [];
+    return sessions.filter((s: any) => s.studentName === selectedStudent);
+  }, [selectedStudent, sessions]);
+
+  // Recent (last 30 days)
+  const recentSessions = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return sessionsForSelected
+      .filter((s) => {
+        const d = parseSessionDate(s);
+        return d !== null && d < today && d >= thirtyDaysAgo;
+      })
+      .sort((a, b) => sessionSortKey(b) - sessionSortKey(a))
+      .slice(0, 5);
+  }, [sessionsForSelected]);
+
+  // Upcoming (cards, cap 4)
+  const upcomingSessions = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return sessionsForSelected
+      .filter((s) => {
+        const d = parseSessionDate(s);
+        return d !== null && d >= today;
+      })
+      .sort((a, b) => sessionSortKey(a) - sessionSortKey(b))
+      .slice(0, 4);
+  }, [sessionsForSelected]);
+
+  // Upcoming (full list for Schedule tab, no cap)
+  const upcomingAllForSelected = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return sessionsForSelected
+      .filter((s) => {
+        const d = parseSessionDate(s);
+        return d !== null && d >= today;
+      })
+      .sort((a, b) => sessionSortKey(a) - sessionSortKey(b));
+  }, [sessionsForSelected]);
+
+  // ================== BILLING: 30 most current session rows (except today) ==================
+  const billingRows: any[] = billing?.account_details ?? [];
 
   const getRowDate = (row: any): Date | null => {
     const raw =
@@ -82,51 +134,39 @@ export default function Dashboard() {
       row?.PostedDate ??
       row?.FormattedDate ??
       null;
-    if (!raw) return null;
-    const d = new Date(String(raw));
-    return isNaN(d.getTime()) ? null : d;
+    return parseDateOnly(raw);
   };
 
-  const last30Rows = useMemo(() => {
-    const rows = billingRows ?? [];
-    if (!rows.length) return [];
+  // Heuristic: treat “session rows” as those with an Attendance value or EventType containing 'Attendance'
+  const isSessionRow = (row: any) => {
+    const att = String(row?.Attendance ?? "").trim();
+    const evt = String(row?.EventType ?? "").toLowerCase();
+    return !!att || evt.includes("attendance");
+  };
 
-    const now = new Date();
-    const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  // Build 30 most current session rows excluding TODAY, newest first
+  const current30SessionRows = useMemo(() => {
+    const today = new Date();
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-    return [...rows]
+    return (billingRows || [])
+      .filter(isSessionRow)
       .filter((r) => {
         const d = getRowDate(r);
-        return d && d >= cutoff;
+        return d !== null && !sameDay(d, todayDateOnly);
       })
       .sort((a, b) => {
         const da = getRowDate(a)?.getTime() ?? 0;
         const db = getRowDate(b)?.getTime() ?? 0;
-        return db - da; // newest first
-      });
+        // newest first
+        if (db !== da) return db - da;
+        // tie-breaker by adjustment magnitude (optional)
+        const aa = Number(a.Adjustment ?? 0);
+        const ab = Number(b.Adjustment ?? 0);
+        return Math.abs(ab) - Math.abs(aa);
+      })
+      .slice(0, 30);
   }, [billingRows]);
-
-  // Early loading return AFTER hooks/top setup
-  if (!user || !dashboardData) {
-    return (
-      <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
-        <div className="text-center">
-          <div className="spinner-border text-primary mb-4" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </div>
-          <p className="text-muted">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const { students, sessions, billing } = dashboardData;
-
-  // Filter sessions based on selected student NAME (for lists)
-  const filteredSessions =
-    selectedStudent && sessions
-      ? sessions.filter((session: any) => session.studentName === selectedStudent)
-      : [];
 
   // Logout
   const handleLogout = async () => {
@@ -138,7 +178,7 @@ export default function Dashboard() {
     }
   };
 
-  // ---------------- Email compose helpers ----------------
+  // Email helpers
   function buildEmailParts() {
     const subject = `Schedule Change Request — ${reqStudent || "Student"}`.replace(/\s+/g, " ").trim();
 
@@ -201,7 +241,7 @@ export default function Dashboard() {
   function openMailto(to: string) {
     const { subjectEnc, bodyEnc } = buildEmailParts();
     const mailto = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
-    window.location.href = mailto; // triggers OS chooser on Android/iOS
+    window.location.href = mailto;
   }
 
   async function handleScheduleSubmit() {
@@ -215,11 +255,25 @@ export default function Dashboard() {
     else openGmailCompose(to);
   }
 
-  /* ========================= SCHEDULE TAB ========================= */
+  // Loading gate
+  if (!user || !dashboardData) {
+    return (
+      <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
+        <div className="text-center">
+          <div className="spinner-border text-primary mb-4" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </div>
+          <p className="text-muted">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ===================== SCHEDULE TAB =====================
   if (activeTab === "schedule") {
     return (
       <div>
-        {/* Header Section */}
+        {/* Header */}
         <div className="header-section">
           <div className="container">
             <div className="d-flex justify-content-between align-items-center">
@@ -243,7 +297,7 @@ export default function Dashboard() {
         </div>
 
         <div className="container mt-4">
-          {/* Navigation Tabs */}
+          {/* Tabs */}
           <ul className="nav nav-tabs" role="tablist">
             <li className="nav-item" role="presentation">
               <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("home"); }}>
@@ -255,22 +309,23 @@ export default function Dashboard() {
                 Schedule Updates
               </a>
             </li>
-            <li className="nav-item" role="presentation">
-              <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("billing"); }}>
-                Account Balance
-              </a>
-            </li>
+            {!hideBilling && (
+              <li className="nav-item" role="presentation">
+                <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("billing"); }}>
+                  Billing Information
+                </a>
+              </li>
+            )}
           </ul>
 
-          {/* Schedule Content */}
           <h3 style={{ marginBottom: "30px" }}>Schedule Management</h3>
 
-          {/* Current Schedule */}
-          {selectedStudent && filteredSessions && filteredSessions.length > 0 ? (
+          {/* Upcoming full table */}
+          {selectedStudent && upcomingAllForSelected.length > 0 ? (
             <div className="card mb-4">
               <div className="card-header">
                 <h5 style={{ color: "white", margin: 0 }}>
-                  Current Schedule for {selectedStudent} ({filteredSessions.length} sessions)
+                  Upcoming Schedule for {selectedStudent}
                 </h5>
               </div>
               <div className="card-body">
@@ -285,23 +340,26 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredSessions.map((session: any, index: number) => (
-                        <tr key={index}>
-                          <td>{session.Day || "N/A"}</td>
-                          <td>{session.Time || "N/A"}</td>
-                          <td>{session.FormattedDate || "N/A"}</td>
-                          <td>Active</td>
-                        </tr>
-                      ))}
+                      {upcomingAllForSelected.map((session: any, index: number) => {
+                        const d = parseSessionDate(session);
+                        return (
+                          <tr key={index}>
+                            <td>{session.Day || "N/A"}</td>
+                            <td>{session.Time || "N/A"}</td>
+                            <td>{formatMonthDayYear(d)}</td>
+                            <td>Active</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
             </div>
           ) : selectedStudent ? (
-            <div className="alert alert-info">No scheduled sessions found for {selectedStudent}.</div>
+            <div className="alert alert-info">No upcoming sessions for {selectedStudent}.</div>
           ) : (
-            <div className="alert alert-info">Please select a student to view their schedule.</div>
+            <div className="alert alert-info">Please select a student to view upcoming schedule.</div>
           )}
 
           {/* Schedule Change Request Form */}
@@ -409,13 +467,11 @@ export default function Dashboard() {
     );
   }
 
-  /* ========================= BILLING TAB ========================= */
-  if (activeTab === "billing") {
-    const hideBilling = !!hideBillingLive; // live flag
-
+  // ===================== BILLING TAB (visible only when allowed) =====================
+  if (activeTab === "billing" && !hideBilling) {
     return (
       <div>
-        {/* Header Section */}
+        {/* Header */}
         <div className="header-section">
           <div className="container">
             <div className="d-flex justify-content-between align-items-center">
@@ -439,7 +495,7 @@ export default function Dashboard() {
         </div>
 
         <div className="container mt-4">
-          {/* Navigation Tabs */}
+          {/* Tabs */}
           <ul className="nav nav-tabs" role="tablist">
             <li className="nav-item" role="presentation">
               <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("home"); }}>
@@ -451,156 +507,104 @@ export default function Dashboard() {
                 Schedule Updates
               </a>
             </li>
-            <li className="nav-item" role="presentation">
-              <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
-                Billing Information
-              </a>
-            </li>
+            {!hideBilling && (
+              <li className="nav-item" role="presentation">
+                <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
+                  Billing Information
+                </a>
+              </li>
+            )}
           </ul>
 
-          {/* Entire billing content wrapped for blur/overlay */}
-          <div className="position-relative">
-            {/* Blurred content */}
-            <div style={hideBilling ? { filter: "blur(6px)", pointerEvents: "none", userSelect: "none" } : undefined}>
-              {/* Account Balance Report */}
-              <div className="card mb-4">
-                <div className="card-header">
-                  <h5 style={{ color: "white", margin: 0 }}>Account Balance Report</h5>
-                </div>
-                <div className="card-body">
-                  <div className="table-container">
-                    <table className="table table-striped table-sm">
-                      <thead>
-                        <tr>
-                          <th>Account Holder</th>
-                          <th>Students</th>
-                          <th>Hours Remaining</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {billing?.extra && billing.extra.length > 0 ? (
-                          billing.extra.map((account: any, index: number) => (
-                            <tr key={index}>
-                              <td>{account.AccountHolder || "N/A"}</td>
-                              <td>{account.StudentNames || students.map((s: any) => s.name).join(", ")}</td>
-                              <td>{typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours</td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={3} className="text-center text-muted">No account information available</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-
-              {/* Account Details - LAST 30 DAYS ONLY */}
-              {last30Rows.length > 0 && (
-                <div className="card mb-4">
-                  <div className="card-header d-flex justify-content-between align-items-center">
-                    <h5 style={{ color: "white", margin: 0 }}>Account Details (Last 30 Days)</h5>
-                    {typeof billing?.remaining_hours === "number" && (
-                      <small className="text-light">Remaining Hours: {billing.remaining_hours.toFixed(1)}</small>
-                    )}
-                  </div>
-
-                  <div className="card-body">
-                    <div className="d-flex justify-content-between align-items-center mb-2">
-                      <small className="text-muted">
-                        Showing {last30Rows.length} {last30Rows.length === 1 ? "record" : "records"}
-                      </small>
-                    </div>
-
-                    <div className="table-container">
-                      <table className="table table-striped table-sm">
-                        <thead>
-                          <tr>
-                            <th style={{ width: 130 }}>Date</th>
-                            <th>Student</th>
-                            <th>Event Type</th>
-                            <th>Attendance</th>
-                            <th className="text-end" style={{ width: 110 }}>Adjustment</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {last30Rows.map((detail: any, index: number) => {
-                            const dt = getRowDate(detail);
-                            const dateLabel =
-                              dt && !isNaN(dt.getTime())
-                                ? dt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
-                                : detail.FormattedDate || "N/A";
-
-                            const adjNum = Number(detail.Adjustment ?? 0);
-                            const adjClass =
-                              Number.isFinite(adjNum) && adjNum !== 0
-                                ? adjNum > 0
-                                  ? "text-success"
-                                  : "text-danger"
-                                : "";
-
-                            return (
-                              <tr key={index}>
-                                <td>{dateLabel}</td>
-                                <td>{detail.Student || "N/A"}</td>
-                                <td>{detail.EventType || "N/A"}</td>
-                                <td>{detail.Attendance || "N/A"}</td>
-                                <td className={`text-end ${adjClass}`}>
-                                  {Number.isFinite(adjNum)
-                                    ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
-                                    : String(detail.Adjustment ?? 0)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {last30Rows.length === 0 && (
-                <div className="card mb-4">
-                  <div className="card-body text-center text-muted">
-                    No billing records in the last 30 days.
-                  </div>
-                </div>
-              )}
+          {/* Summary (hours remain) */}
+          <div className="card mb-4">
+            <div className="card-header">
+              <h5 style={{ color: "white", margin: 0 }}>Account Balance Summary</h5>
             </div>
-
-            {/* Overlay when hidden */}
-            {hideBilling && (
-              <div
-                className="d-flex align-items-center justify-content-center text-center"
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  padding: "1rem",
-                  background: "rgba(255,255,255,0.65)",
-                  backdropFilter: "saturate(120%) blur(2px)",
-                }}
-              >
-                <div className="card shadow-sm" style={{ maxWidth: 520 }}>
-                  <div className="card-body">
-                    <h5 className="mb-2">Billing information is restricted</h5>
-                    <p className="mb-0 text-muted">Please contact your center for access.</p>
+            <div className="card-body">
+              <div className="d-flex justify-content-between">
+                <div>
+                  <div className="text-muted small mb-1">Hours Remaining</div>
+                  <div className="h4 mb-0" style={{ color: "var(--tutoring-blue)" }}>
+                    {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
+                  </div>
+                </div>
+                <div className="text-end">
+                  <div className="text-muted small mb-1">Students</div>
+                  <div className="fw-semibold">
+                    {students.map((s: any) => s.name).join(", ")}
                   </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
+
+          {/* Account Details: 30 MOST CURRENT SESSIONS (EXCEPT TODAY) */}
+          <div className="card mb-4">
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <h5 style={{ color: "white", margin: 0 }}>Account Details</h5>
+              <small className="text-light">30 most current sessions</small>
+            </div>
+            <div className="card-body">
+              <div className="table-container">
+                <table className="table table-striped table-sm">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 130 }}>Date</th>
+                      <th>Student</th>
+                      <th>Event Type</th>
+                      <th>Attendance</th>
+                      <th className="text-end" style={{ width: 110 }}>Adjustment</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {current30SessionRows.length ? (
+                      current30SessionRows.map((detail: any, index: number) => {
+                        const d = getRowDate(detail);
+                        const dateLabel = formatMonthDayYear(d);
+
+                        const adjNum = Number(detail.Adjustment ?? 0);
+                        const adjClass =
+                          Number.isFinite(adjNum) && adjNum !== 0
+                            ? adjNum > 0
+                              ? "text-success"
+                              : "text-danger"
+                            : "";
+
+                        return (
+                          <tr key={index}>
+                            <td>{dateLabel}</td>
+                            <td>{detail.Student || "N/A"}</td>
+                            <td>{detail.EventType || "N/A"}</td>
+                            <td>{detail.Attendance || "N/A"}</td>
+                            <td className={`text-end ${adjClass}`}>
+                              {Number.isFinite(adjNum)
+                                ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
+                                : String(detail.Adjustment ?? 0)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="text-center text-muted">No session records available.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     );
   }
 
-  /* ========================= HOME TAB (default) ========================= */
+  // ===================== HOME =====================
   return (
     <div>
-      {/* Header Section */}
+      {/* Header */}
       <div className="header-section">
         <div className="container">
           <div className="d-flex justify-content-between align-items-center">
@@ -622,7 +626,7 @@ export default function Dashboard() {
       </div>
 
       <div className="container mt-4">
-        {/* Navigation Tabs */}
+        {/* Tabs */}
         <ul className="nav nav-tabs" role="tablist">
           <li className="nav-item" role="presentation">
             <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
@@ -634,11 +638,13 @@ export default function Dashboard() {
               Schedule Updates
             </a>
           </li>
-          <li className="nav-item" role="presentation">
-            <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("billing"); }}>
-              Billing Information
-            </a>
-          </li>
+          {!hideBilling && (
+            <li className="nav-item" role="presentation">
+              <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("billing"); }}>
+                Billing Information
+              </a>
+            </li>
+          )}
         </ul>
 
         {/* Stats Grid */}
@@ -700,22 +706,21 @@ export default function Dashboard() {
 
         {/* Main Dashboard Grid */}
         <div className="row">
-          {/* Recent Sessions */}
+          {/* Recent Sessions (last 30 days) */}
           <div className="col-lg-4 mb-4">
             <div className="card">
               <div className="card-header">
                 <h6>
                   <img src={scheduleIconPath} alt="Schedule Icon" style={{ width: "20px", height: "20px", marginRight: "8px" }} />
-                  Recent Sessions
+                  Recent Sessions (Last 30 Days)
                 </h6>
               </div>
               <div className="card-body">
-                {selectedStudent && filteredSessions && filteredSessions.length > 0 ? (
+                {selectedStudent && recentSessions.length > 0 ? (
                   <div className="timeline-container" style={{ maxHeight: "300px", overflowY: "auto" }}>
-                    {filteredSessions
-                      .filter((session: any) => session && session.category === "recent")
-                      .slice(0, 5)
-                      .map((session: any, index: number) => (
+                    {recentSessions.map((session: any, index: number) => {
+                      const d = parseSessionDate(session);
+                      return (
                         <div key={index} className="timeline-item mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
                           <div className="d-flex">
                             <div className="timeline-marker me-3 mt-1">
@@ -723,14 +728,15 @@ export default function Dashboard() {
                             </div>
                             <div className="flex-grow-1">
                               <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                              <p className="mb-1 small">{session?.FormattedDate || "N/A"}</p>
+                              <p className="mb-1 small">{formatMonthDayYear(d)}</p>
                               <p className="mb-0 text-muted small">
-                                {session?.Day || "N/A"} • {session?.Time || "N/A"}
+                                {(session?.Day || "N/A")} • {(session?.Time || "N/A")}
                               </p>
                             </div>
                           </div>
                         </div>
-                      ))}
+                      );
+                    })}
                   </div>
                 ) : selectedStudent ? (
                   <div className="alert alert-info small">No recent sessions found for {selectedStudent}.</div>
@@ -741,7 +747,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Upcoming Sessions */}
+          {/* Upcoming Sessions (cap 4) */}
           <div className="col-lg-4 mb-4">
             <div className="card">
               <div className="card-header">
@@ -752,11 +758,10 @@ export default function Dashboard() {
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                  {selectedStudent && filteredSessions && filteredSessions.length > 0 ? (
-                    filteredSessions
-                      .filter((session: any) => session && session.category === "upcoming")
-                      .slice(0, 4)
-                      .map((session: any, index: number) => (
+                  {selectedStudent && upcomingSessions.length > 0 ? (
+                    upcomingSessions.map((session: any, index: number) => {
+                      const d = parseSessionDate(session);
+                      return (
                         <div
                           key={index}
                           className="session-item mb-3 p-2"
@@ -769,7 +774,7 @@ export default function Dashboard() {
                           <div className="d-flex justify-content-between align-items-start">
                             <div>
                               <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                              <p className="mb-0 small text-muted">{session?.FormattedDate || "N/A"}</p>
+                              <p className="mb-0 small text-muted">{formatMonthDayYear(d)}</p>
                             </div>
                             <div className="text-end">
                               <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
@@ -779,7 +784,8 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </div>
-                      ))
+                      );
+                    })
                   ) : selectedStudent ? (
                     <div className="alert alert-info small">No upcoming sessions found for {selectedStudent}.</div>
                   ) : (
@@ -805,14 +811,16 @@ export default function Dashboard() {
                     <i className="fas fa-calendar-edit me-2"></i>
                     Request Schedule Change
                   </button>
-                  <button className="btn btn-outline-primary" onClick={() => setActiveTab("billing")}>
-                    <img
-                      src={billingIconPath}
-                      alt="Billing Icon"
-                      style={{ width: "16px", height: "16px", marginRight: "8px" }}
-                    />
-                    View Billing Details
-                  </button>
+                  {!hideBilling && (
+                    <button className="btn btn-outline-primary" onClick={() => setActiveTab("billing")}>
+                      <img
+                        src={billingIconPath}
+                        alt="Billing Icon"
+                        style={{ width: "16px", height: "16px", marginRight: "8px" }}
+                      />
+                      View Billing Details
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
