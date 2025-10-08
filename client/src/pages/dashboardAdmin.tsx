@@ -1,26 +1,26 @@
-// src/pages/dashboardAdmin.tsx
 import React, { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
-type FlagsResp = { franchiseId: string; hideBilling: boolean };
+type Flags = { hideBilling?: boolean; hideHours?: boolean };
 
 export default function DashboardAdmin() {
   const [, navigate] = useLocation();
   const [me, setMe] = useState<{ franchiseId: string | number; email: string } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hideBilling, setHideBilling] = useState<boolean>(false);
-  const [saving, setSaving] = useState(false);
+  const [flags, setFlags] = useState<Flags>({ hideBilling: false, hideHours: false });
+  const [savingKey, setSavingKey] = useState<null | "hideBilling" | "hideHours">(null);
 
+  // auth + flags
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await fetch("/api/admin/me", { credentials: "include" });
-        if (!meRes.ok) throw new Error();
-        const meJson = await meRes.json();
-        setMe(meJson);
+        const r = await fetch("/api/admin/me");
+        if (!r.ok) throw new Error("not admin");
+        const j = await r.json();
+        setMe(j);
 
-        const f = await fetch("/api/admin/flags", { credentials: "include" }).then(r => r.json()) as FlagsResp;
-        setHideBilling(!!f.hideBilling);
+        const f = await fetch("/api/admin/flags").then((x) => x.json());
+        setFlags({ hideBilling: !!f.hideBilling, hideHours: !!f.hideHours });
       } catch {
         navigate("/admin-login");
       } finally {
@@ -29,29 +29,27 @@ export default function DashboardAdmin() {
     })();
   }, [navigate]);
 
-  const toggleHideBilling = async () => {
-    setSaving(true);
+  const toggle = async (key: "hideBilling" | "hideHours") => {
+    setSavingKey(key);
     try {
+      const next = { ...flags, [key]: !flags[key] };
       const r = await fetch("/api/admin/flags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ hideBilling: !hideBilling })
+        body: JSON.stringify({ [key]: next[key] }),
       });
-      const j = await r.json() as FlagsResp;
-      if (!r.ok) throw new Error(j as any);
-      setHideBilling(!!j.hideBilling);
-      // Parents will see the Billing tab appear/disappear on their next refresh
-      // (or immediately if you add WS/SSE again).
-    } catch (e: any) {
-      alert(e?.message || "Failed to update");
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.message || "Failed to update flag");
+      setFlags({ hideBilling: !!j.hideBilling, hideHours: !!j.hideHours });
+    } catch (e) {
+      alert((e as Error).message);
     } finally {
-      setSaving(false);
+      setSavingKey(null);
     }
   };
 
   const logout = async () => {
-    await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
+    await fetch("/api/admin/logout", { method: "POST" });
     navigate("/admin-login");
   };
 
@@ -80,28 +78,62 @@ export default function DashboardAdmin() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <h5 className="m-0 text-white">Billing Tab Visibility</h5>
-        </div>
-        <div className="card-body">
-          <p className="text-muted">
-            Toggle whether parents at this franchise can see the <strong>Billing Information</strong> tab at all.
-          </p>
-          <div className="form-check form-switch">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="hideBillingSwitch"
-              checked={hideBilling}
-              onChange={toggleHideBilling}
-              disabled={saving}
-            />
-            <label className="form-check-label" htmlFor="hideBillingSwitch">
-              {hideBilling ? "Hidden (tab removed)" : "Visible (tab shown)"}
-            </label>
+      <div className="row g-4">
+        {/* Billing tab visibility */}
+        <div className="col-md-6">
+          <div className="card">
+            <div className="card-header">
+              <h5 className="m-0 text-white">Billing Tab Visibility</h5>
+            </div>
+            <div className="card-body">
+              <p className="text-muted">
+                Toggle whether parents at this franchise can see the <strong>Billing</strong> tab.
+              </p>
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="hideBillingSwitch"
+                  checked={!!flags.hideBilling}
+                  onChange={() => toggle("hideBilling")}
+                  disabled={savingKey === "hideBilling"}
+                />
+                <label className="form-check-label" htmlFor="hideBillingSwitch">
+                  {flags.hideBilling ? "Hidden (tab removed)" : "Visible"}
+                </label>
+              </div>
+              {savingKey === "hideBilling" && <div className="small text-muted mt-2">Saving…</div>}
+            </div>
           </div>
-          {saving && <div className="small text-muted mt-2">Saving…</div>}
+        </div>
+
+        {/* Hours balance visibility */}
+        <div className="col-md-6">
+          <div className="card">
+            <div className="card-header">
+              <h5 className="m-0 text-white">Hours Balance Visibility</h5>
+            </div>
+            <div className="card-body">
+              <p className="text-muted">
+                Toggle whether parents at this franchise can see <strong>Hours Remaining</strong>
+                —on the Home card and in Billing summary.
+              </p>
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="hideHoursSwitch"
+                  checked={!!flags.hideHours}
+                  onChange={() => toggle("hideHours")}
+                  disabled={savingKey === "hideHours"}
+                />
+                <label className="form-check-label" htmlFor="hideHoursSwitch">
+                  {flags.hideHours ? "Hidden (hours not shown)" : "Visible"}
+                </label>
+              </div>
+              {savingKey === "hideHours" && <div className="small text-muted mt-2">Saving…</div>}
+            </div>
+          </div>
         </div>
       </div>
     </div>

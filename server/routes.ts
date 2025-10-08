@@ -16,7 +16,7 @@ import {
 import { getPool, sql } from "./db";
 
 /* ------------------------------------------------------------------ */
-/* ESM-safe __dirname + stable data path (works in dev and dist)      */
+/* ESM-safe __dirname + stable data path                               */
 /* ------------------------------------------------------------------ */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,14 +49,15 @@ declare module "express-session" {
 /* JSON shape:
    {
      "franchises": {
-       "6": { "hideBilling": true },
-       "8": { "hideBilling": false }
+       "6": { "hideBilling": true, "hideHours": false },
+       "8": { "hideBilling": false, "hideHours": true }
      }
    }
 */
 /* ------------------------------------------------------------------ */
 
-type FranchiseFlagsRecord = Record<string, { hideBilling?: boolean }>;
+type Flags = { hideBilling?: boolean; hideHours?: boolean };
+type FranchiseFlagsRecord = Record<string, Flags>;
 
 async function ensureFlagsFile() {
   await fs.mkdir(FLAGS_DIR, { recursive: true });
@@ -82,7 +83,10 @@ async function readFlags(): Promise<FranchiseFlagsRecord> {
   return {};
 }
 
-async function writeFlags(franchiseId: string, patch: { hideBilling?: boolean }) {
+async function writeFlags(
+  franchiseId: string,
+  patch: Partial<Flags>
+) {
   await ensureFlagsFile();
   let root: { franchises: FranchiseFlagsRecord } = { franchises: {} };
   try {
@@ -98,6 +102,7 @@ async function writeFlags(franchiseId: string, patch: { hideBilling?: boolean })
   root.franchises[franchiseId] = {
     ...cur,
     ...(patch.hideBilling !== undefined ? { hideBilling: !!patch.hideBilling } : {}),
+    ...(patch.hideHours   !== undefined ? { hideHours:   !!patch.hideHours   } : {}),
   };
   await fs.writeFile(FLAGS_FILE, JSON.stringify(root, null, 2), "utf-8");
 }
@@ -128,7 +133,7 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
   const q = pool.request();
   q.input("sid", sql.Int, studentId);
 
-  // NOTE: table name is dpinkney_TC.dbo.tblFranchies with column FranchiesEmail (as provided)
+  // NOTE: table name is dpinkney_TC.dbo.tblFranchies with column FranchiesEmail
   const rs = await q.query(`
     SELECT TOP 1 F.FranchiesEmail AS CenterEmail
     FROM dbo.tblstudents S
@@ -233,7 +238,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           subject: "N/A",
           status: "active",
           progress: 0,
-          // Optional: expose franchise id to client if needed elsewhere
           franchiseId: s.FranchiseID ?? null,
         })),
       });
@@ -259,10 +263,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const studentsInfo = inquiryData.students || [];
 
-      // ---- Read feature flags and compute hideBilling for this parent ----
+      // ---- Read feature flags and compute policy for this parent ----
       let hideBillingForParent = false;
+      let hideHoursForParent = false;
       try {
-        const flags = await readFlags(); // { [fid]: { hideBilling } }
+        const flags = await readFlags(); // { [fid]: { hideBilling, hideHours } }
         const franchiseIds = Array.from(
           new Set(
             (studentsInfo || [])
@@ -272,6 +277,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           )
         );
         hideBillingForParent = franchiseIds.some((fid) => !!flags[fid]?.hideBilling);
+        hideHoursForParent   = franchiseIds.some((fid) => !!flags[fid]?.hideHours);
       } catch (e) {
         console.warn("[dashboard] readFlags failed, default visible:", e);
       }
@@ -302,7 +308,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return (a.TimeID ?? 0) - (b.TimeID ?? 0);
       });
 
-      // Normalize to ISO
+      // Normalize to ISO for client date-only rendering
       const sessionsOut = allSessions.map((s) => ({
         ...s,
         ScheduleDateISO:
@@ -345,29 +351,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       });
 
-      // Billing (keep summary & remaining_hours; drop details when hidden)
+      // Billing
       const billingInfo = await getHoursBalance(inquiryIdNum);
 
-      const billingOut = billingInfo
-        ? {
-            currentBalance: "0.00",
-            monthlyRate: "320.00",
-            nextPaymentDate: "N/A",
-            paymentMethod: "N/A",
-            sessionsThisMonth: sessionsOut.length,
-            balance: billingInfo.balance ?? {},
-            extra: billingInfo.extra ?? [],
-            remaining_hours: billingInfo.remaining_hours ?? 0,
-            account_details: hideBillingForParent ? [] : (billingInfo.account_details ?? []),
-          }
-        : null;
+      // If hours are hidden, zero out remaining_hours so the client can’t accidentally show it
+      if (billingInfo && hideHoursForParent) {
+        (billingInfo as any).remaining_hours = null;
+      }
 
       res.json({
         students,
         sessions: sessionsOut,
-        billing: billingOut,
+        billing: billingInfo
+          ? {
+              currentBalance: "0.00",
+              monthlyRate: "320.00",
+              nextPaymentDate: "N/A",
+              paymentMethod: "N/A",
+              ...billingInfo,
+            }
+          : null,
         transactions: [],
-        uiPolicy: { hideBilling: hideBillingForParent },
+        uiPolicy: { hideBilling: hideBillingForParent, hideHours: hideHoursForParent },
       });
     } catch (error) {
       console.error("Dashboard error:", error);
@@ -486,27 +491,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const fid = String(req.session.adminFranchiseId!);
       const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false };
-      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling });
+      const rec = all[fid] || { hideBilling: false, hideHours: false };
+      res.json({
+        franchiseId: fid,
+        hideBilling: !!rec.hideBilling,
+        hideHours: !!rec.hideHours,
+      });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to read flags" });
     }
   });
 
-  // Accepts { hideBilling: boolean } or { policy: { hideBilling: boolean } } (back-compat)
+  // Accepts any subset of { hideBilling, hideHours }
   app.post("/api/admin/flags", requireAdminAuth, async (req, res) => {
     try {
       const fid = String(req.session.adminFranchiseId!);
-      const hideBilling =
-        req.body?.hideBilling ??
-        req.body?.policy?.hideBilling;
-      if (hideBilling === undefined) {
-        return res.status(400).json({ message: "hideBilling is required" });
+      const patch: Partial<Flags> = {};
+
+      if (req.body?.hideBilling !== undefined) patch.hideBilling = !!req.body.hideBilling;
+      if (req.body?.hideHours !== undefined)   patch.hideHours   = !!req.body.hideHours;
+
+      // also support { policy: { ... } } (back-compat)
+      if (req.body?.policy && typeof req.body.policy === "object") {
+        const p = req.body.policy;
+        if (p.hideBilling !== undefined) patch.hideBilling = !!p.hideBilling;
+        if (p.hideHours   !== undefined) patch.hideHours   = !!p.hideHours;
       }
-      await writeFlags(fid, { hideBilling: !!hideBilling });
+
+      if (Object.keys(patch).length === 0) {
+        return res.status(400).json({ message: "No valid flags provided" });
+      }
+
+      await writeFlags(fid, patch);
       const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false };
-      res.json({ franchiseId: fid, hideBilling: !!rec.hideBilling });
+      const rec = all[fid] || { hideBilling: false, hideHours: false };
+      res.json({
+        franchiseId: fid,
+        hideBilling: !!rec.hideBilling,
+        hideHours: !!rec.hideHours,
+      });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to update flags" });
     }
