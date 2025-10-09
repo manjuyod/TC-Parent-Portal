@@ -19,11 +19,11 @@ export default function Dashboard() {
   const [reqChange, setReqChange] = useState("");
   const [reqReason, setReqReason] = useState("");
 
-  // Data
   const { data: user } = useQuery({ queryKey: ["/api/auth/me"] });
   const { data: dashboardData } = useQuery({ queryKey: ["/api/dashboard"], enabled: !!user });
 
   const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
+  const hideHours   = !!dashboardData?.uiPolicy?.hideHours;
 
   // If someone somehow lands on 'billing' while hidden, bounce to home
   useEffect(() => {
@@ -34,12 +34,10 @@ export default function Dashboard() {
   const parseDateOnly = (isoOrAny: string | Date | null | undefined): Date | null => {
     if (!isoOrAny) return null;
     if (typeof isoOrAny === "string") {
-      // if ISO with time, keep date portion; if already date-like, still works
       const d = new Date(isoOrAny);
       if (!isNaN(d.getTime())) {
         return new Date(d.getFullYear(), d.getMonth(), d.getDate());
       }
-      // fallback: take first 10 as YYYY-MM-DD
       const iso = isoOrAny.length >= 10 ? isoOrAny.slice(0, 10) : isoOrAny;
       const d2 = new Date(`${iso}T00:00:00`);
       return isNaN(d2.getTime()) ? null : d2;
@@ -65,27 +63,23 @@ export default function Dashboard() {
   const sessions: any[] = dashboardData?.sessions ?? [];
   const billing = dashboardData?.billing;
 
-  // ----- Session parsing + sorting -----
   const parseSessionDate = (s: any): Date | null => {
     const iso: string | undefined = s?.ScheduleDateISO;
     if (iso) return parseDateOnly(iso);
     return parseDateOnly(s?.ScheduleDate);
   };
 
-  // Build a sortable timestamp for sessions (date + TimeID fallback)
   const sessionSortKey = (s: any): number => {
     const d = parseSessionDate(s)?.getTime() ?? 0;
     const tid = Number.isFinite(Number(s?.TimeID)) ? Number(s.TimeID) : 0;
-    return d * 1000 + tid; // composite for stable ordering
+    return d * 1000 + tid;
   };
 
-  // ===== Sessions for selected student (used across Home/Schedule) =====
   const sessionsForSelected: any[] = useMemo(() => {
     if (!selectedStudent || !sessions.length) return [];
     return sessions.filter((s: any) => s.studentName === selectedStudent);
   }, [selectedStudent, sessions]);
 
-  // Recent (last 30 days)
   const recentSessions = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -99,7 +93,6 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [sessionsForSelected]);
 
-  // Upcoming (cards, cap 4)
   const upcomingSessions = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -112,7 +105,6 @@ export default function Dashboard() {
       .slice(0, 4);
   }, [sessionsForSelected]);
 
-  // Upcoming (full list for Schedule tab, no cap)
   const upcomingAllForSelected = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -124,7 +116,7 @@ export default function Dashboard() {
       .sort((a, b) => sessionSortKey(a) - sessionSortKey(b));
   }, [sessionsForSelected]);
 
-  // ================== BILLING: 30 most current session rows (except today) ==================
+  // ================== BILLING rows: 30 most current sessions (except today) ==================
   const billingRows: any[] = billing?.account_details ?? [];
 
   const getRowDate = (row: any): Date | null => {
@@ -137,14 +129,12 @@ export default function Dashboard() {
     return parseDateOnly(raw);
   };
 
-  // Heuristic: treat “session rows” as those with an Attendance value or EventType containing 'Attendance'
   const isSessionRow = (row: any) => {
     const att = String(row?.Attendance ?? "").trim();
     const evt = String(row?.EventType ?? "").toLowerCase();
     return !!att || evt.includes("attendance");
   };
 
-  // Build 30 most current session rows excluding TODAY, newest first
   const current30SessionRows = useMemo(() => {
     const today = new Date();
     const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -158,9 +148,7 @@ export default function Dashboard() {
       .sort((a, b) => {
         const da = getRowDate(a)?.getTime() ?? 0;
         const db = getRowDate(b)?.getTime() ?? 0;
-        // newest first
-        if (db !== da) return db - da;
-        // tie-breaker by adjustment magnitude (optional)
+        if (db !== da) return db - da; // newest first
         const aa = Number(a.Adjustment ?? 0);
         const ab = Number(b.Adjustment ?? 0);
         return Math.abs(ab) - Math.abs(aa);
@@ -168,7 +156,6 @@ export default function Dashboard() {
       .slice(0, 30);
   }, [billingRows]);
 
-  // Logout
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -178,7 +165,6 @@ export default function Dashboard() {
     }
   };
 
-  // Email helpers
   function buildEmailParts() {
     const subject = `Schedule Change Request — ${reqStudent || "Student"}`.replace(/\s+/g, " ").trim();
 
@@ -255,7 +241,6 @@ export default function Dashboard() {
     else openGmailCompose(to);
   }
 
-  // Loading gate
   if (!user || !dashboardData) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
@@ -325,7 +310,7 @@ export default function Dashboard() {
             <div className="card mb-4">
               <div className="card-header">
                 <h5 style={{ color: "white", margin: 0 }}>
-                  Upcoming Schedule for {selectedStudent}
+                  Upcoming Schedule for {selectedStudent} ({upcomingAllForSelected.length})
                 </h5>
               </div>
               <div className="card-body">
@@ -526,7 +511,11 @@ export default function Dashboard() {
                 <div>
                   <div className="text-muted small mb-1">Hours Remaining</div>
                   <div className="h4 mb-0" style={{ color: "var(--tutoring-blue)" }}>
-                    {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
+                    {hideHours
+                      ? "Restricted"
+                      : (typeof billing?.remaining_hours === "number"
+                          ? billing.remaining_hours.toFixed(1)
+                          : "0.0") + " hours"}
                   </div>
                 </div>
                 <div className="text-end">
@@ -543,7 +532,7 @@ export default function Dashboard() {
           <div className="card mb-4">
             <div className="card-header d-flex justify-content-between align-items-center">
               <h5 style={{ color: "white", margin: 0 }}>Account Details</h5>
-              <small className="text-light">30 most current sessions</small>
+              <small className="text-light">30 most current sessions (excluding today)</small>
             </div>
             <div className="card-body">
               <div className="table-container">
@@ -682,26 +671,28 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="col-md-6 mb-3">
-            <div
-              className="card"
-              style={{ cursor: "pointer", transition: "transform 0.2s ease" }}
-              onClick={() => setActiveTab("billing")}
-            >
-              <div className="card-body d-flex justify-content-between align-items-start">
-                <div>
-                  <p className="text-muted mb-1 small text-uppercase">Account Balance</p>
-                  <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
-                    {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
-                  </h4>
-                  <p className="text-muted small mb-0">Hours remaining - Click to view billing details</p>
-                </div>
-                <div className="text-end">
-                  <i className="fas fa-hourglass" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
+          {!hideHours && (
+            <div className="col-md-6 mb-3">
+              <div
+                className="card"
+                style={{ cursor: "pointer", transition: "transform 0.2s ease" }}
+                onClick={() => setActiveTab("billing")}
+              >
+                <div className="card-body d-flex justify-content-between align-items-start">
+                  <div>
+                    <p className="text-muted mb-1 small text-uppercase">Account Balance</p>
+                    <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
+                      {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
+                    </h4>
+                    <p className="text-muted small mb-0">Hours remaining - Click to view billing details</p>
+                  </div>
+                  <div className="text-end">
+                    <i className="fas fa-hourglass" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Main Dashboard Grid */}
