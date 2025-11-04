@@ -6,6 +6,22 @@ import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
 
 type Tab = "home" | "schedule" | "billing";
 
+type BillingColumnVisibility = {
+  hideDate?: boolean;
+  hideStudent?: boolean;
+  hideEventType?: boolean;
+  hideAttendance?: boolean;
+  hideAdjustment?: boolean;
+};
+
+const DEFAULT_COLS: Required<BillingColumnVisibility> = {
+  hideDate: false,
+  hideStudent: false,
+  hideEventType: false,
+  hideAttendance: false,
+  hideAdjustment: false,
+};
+
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -23,7 +39,12 @@ export default function Dashboard() {
   const { data: dashboardData } = useQuery({ queryKey: ["/api/dashboard"], enabled: !!user });
 
   const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
-  const hideHours   = !!dashboardData?.uiPolicy?.hideHours;
+  const hideHours = !!dashboardData?.uiPolicy?.hideHours;
+
+  const cols: Required<BillingColumnVisibility> = {
+    ...DEFAULT_COLS,
+    ...(dashboardData?.uiPolicy?.billingColumnVisibility ?? {}),
+  };
 
   // If someone somehow lands on 'billing' while hidden, bounce to home
   useEffect(() => {
@@ -183,7 +204,7 @@ export default function Dashboard() {
       `Requested change:`,
       `${reqChange || "(no details)"}`,
       ``,
-      `Reason (optional):`,
+      `Reason:`,
       `${reqReason || "(none)"}`,
       ``,
       `— Sent from Tutoring Club Parent Portal`,
@@ -254,7 +275,7 @@ export default function Dashboard() {
     );
   }
 
-  // ===================== SCHEDULE TAB =====================
+  /* ===================== SCHEDULE TAB ===================== */
   if (activeTab === "schedule") {
     return (
       <div>
@@ -347,112 +368,213 @@ export default function Dashboard() {
             <div className="alert alert-info">Please select a student to view upcoming schedule.</div>
           )}
 
-          {/* Schedule Change Request Form */}
+          {/* ======= Schedule Change Request Form (refined) ======= */}
           <div className="card">
-            <div className="card-header">
-              <h5>Request Schedule Change</h5>
+            <div className="card-header d-flex align-items-center">
+              <i className="fas fa-calendar-check me-2"></i>
+              <h5 className="m-0">Request Schedule Change</h5>
             </div>
+
             <div className="card-body">
-              <form onSubmit={(e) => e.preventDefault()}>
-                <div className="row">
-                  <div className="col-md-6 mb-3">
-                    <label htmlFor="student_name" className="form-label">Student Name</label>
-                    <select
-                      className="form-control"
-                      id="student_name"
-                      required
-                      value={reqStudentId ?? ""}
-                      onChange={(e) => {
-                        const id = e.target.value ? Number(e.target.value) : null;
-                        setReqStudentId(id);
-                        const name = students.find((s: any) => s.id === id)?.name || "";
-                        setReqStudent(name);
-                      }}
-                    >
-                      <option value="">Select a student</option>
-                      {students.map((student: any) => (
-                        <option key={student.id} value={student.id}>
-                          {student.name}
-                        </option>
-                      ))}
-                    </select>
+              <p className="text-muted mb-4">
+                Use this form to request a new start date/time or describe a change to your student’s
+                current session. We’ll email your center with the details.
+              </p>
+
+              <form onSubmit={(e) => e.preventDefault()} noValidate>
+                {/* Row 1: Student + Current Session */}
+                <div className="row g-3">
+                  <div className="col-md-6">
+                    <label htmlFor="student_name" className="form-label">
+                      Student <span className="text-danger">*</span>
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text">
+                        <i className="fas fa-user-graduate" aria-hidden="true"></i>
+                      </span>
+                      <select
+                        className="form-control"
+                        id="student_name"
+                        name="student_name"
+                        autoComplete="name"
+                        required
+                        value={reqStudentId ?? ""}
+                        onChange={(e) => {
+                          const id = e.target.value ? Number(e.target.value) : null;
+                          setReqStudentId(id);
+                          const name = students.find((s: any) => s.id === id)?.name || "";
+                          setReqStudent(name);
+                        }}
+                      >
+                        <option value="">Select a student…</option>
+                        {students.map((student: any) => (
+                          <option key={student.id} value={student.id}>
+                            {student.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-text">Choose the student this change applies to.</div>
                   </div>
-                  <div className="col-md-6 mb-3">
-                    <label htmlFor="current_session" className="form-label">Current Session</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      id="current_session"
-                      placeholder="e.g., Monday 3:00 PM"
-                      required
-                      value={reqCurrent}
-                      onChange={(e) => setReqCurrent(e.target.value)}
-                    />
+
+                  <div className="col-md-6">
+                    <label htmlFor="current_session" className="form-label">
+                      Current Session <span className="text-danger">*</span>
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text">
+                        <i className="fas fa-clock" aria-hidden="true"></i>
+                      </span>
+                      <input
+                        type="text"
+                        className="form-control"
+                        id="current_session"
+                        name="current_session"
+                        placeholder="e.g., Monday 3:00 PM"
+                        autoComplete="off"
+                        required
+                        value={reqCurrent}
+                        onChange={(e) => setReqCurrent(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-text">Tell us the student’s current day/time.</div>
                   </div>
                 </div>
 
-                <div className="row">
-                  <div className="col-md-6 mb-3">
-                    <label htmlFor="preferred_date" className="form-label">New Schedule Start Date</label>
-                    <input
-                      type="date"
-                      className="form-control"
-                      id="preferred_date"
-                      required
-                      value={reqDate}
-                      onChange={(e) => setReqDate(e.target.value)}
-                    />
+                <hr className="my-4" />
+
+                {/* Row 2: Preferred Date + Time */}
+                <div className="row g-3">
+                  <div className="col-md-6">
+                    <label htmlFor="preferred_date" className="form-label">
+                      New Schedule Start Date <span className="text-danger">*</span>
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text">
+                        <i className="fas fa-calendar-day" aria-hidden="true"></i>
+                      </span>
+                      <input
+                        type="date"
+                        className="form-control"
+                        id="preferred_date"
+                        name="preferred_date"
+                        autoComplete="off"
+                        required
+                        value={reqDate}
+                        onChange={(e) => setReqDate(e.target.value)}
+                      />
+                    </div>
                   </div>
-                  <div className="col-md-6 mb-3">
-                    <label htmlFor="preferred_time" className="form-label">New Schedule Start Time</label>
-                    <input
-                      type="time"
-                      className="form-control"
-                      id="preferred_time"
-                      required
-                      value={reqTime}
-                      onChange={(e) => setReqTime(e.target.value)}
-                    />
+
+                  <div className="col-md-6">
+                    <label htmlFor="preferred_time" className="form-label">
+                      New Schedule Start Time <span className="text-danger">*</span>
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text">
+                        <i className="fas fa-hourglass-start" aria-hidden="true"></i>
+                      </span>
+                      <input
+                        type="time"
+                        className="form-control"
+                        id="preferred_time"
+                        name="preferred_time"
+                        autoComplete="off"
+                        required
+                        value={reqTime}
+                        onChange={(e) => setReqTime(e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="mb-3">
-                  <label htmlFor="requested_change" className="form-label">Requested Change</label>
-                  <textarea
-                    className="form-control"
-                    id="requested_change"
-                    rows={3}
-                    placeholder="Describe what changes you would like to make"
-                    required
-                    value={reqChange}
-                    onChange={(e) => setReqChange(e.target.value)}
-                  />
+                <hr className="my-4" />
+
+                {/* Row 3: Requested Change + Reason */}
+                <div className="row g-3">
+                  <div className="col-md-7">
+                    <label htmlFor="requested_change" className="form-label">
+                      Requested Change <span className="text-danger">*</span>
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text">
+                        <i className="fas fa-pen" aria-hidden="true"></i>
+                      </span>
+                      <textarea
+                        className="form-control"
+                        id="requested_change"
+                        name="requested_change"
+                        rows={4}
+                        placeholder="Describe the change you're requesting (e.g., move to Tue/Thu at 4:00 PM)…"
+                        autoComplete="off"
+                        required
+                        value={reqChange}
+                        onChange={(e) => setReqChange(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-text">Please include any specific days, times, or constraints.</div>
+                  </div>
+
+                  <div className="col-md-5">
+                    <label htmlFor="reason" className="form-label">
+                      Reason
+                    </label>
+                    <div className="input-group">
+                      <span className="input-group-text">
+                        <i className="fas fa-comment-dots" aria-hidden="true"></i>
+                      </span>
+                      <textarea
+                        className="form-control"
+                        id="reason"
+                        name="reason"
+                        rows={4}
+                        placeholder="Briefly share the reason for this change…"
+                        autoComplete="off"
+                        value={reqReason}
+                        onChange={(e) => setReqReason(e.target.value)}
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="mb-3">
-                  <label htmlFor="reason" className="form-label">Reason for Change (Optional)</label>
-                  <textarea
-                    className="form-control"
-                    id="reason"
-                    rows={3}
-                    placeholder="Please explain why you need this schedule change"
-                    value={reqReason}
-                    onChange={(e) => setReqReason(e.target.value)}
-                  />
-                </div>
+                {/* Actions */}
+                <div className="d-flex flex-wrap gap-2 mt-4">
+                  <button
+                    type="button"
+                    className="btn btn-success"
+                    onClick={handleScheduleSubmit}
+                  >
+                    <i className="fas fa-paper-plane me-2"></i>
+                    Submit Request
+                  </button>
 
-                <button type="button" className="btn btn-success" onClick={handleScheduleSubmit}>
-                  Submit Schedule Change Request
-                </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary"
+                    onClick={() => {
+                      setReqStudentId(null);
+                      setReqStudent("");
+                      setReqCurrent("");
+                      setReqDate("");
+                      setReqTime("");
+                      setReqChange("");
+                      setReqReason("");
+                    }}
+                  >
+                    <i className="fas fa-rotate-left me-2"></i>
+                    Clear
+                  </button>
+                </div>
               </form>
             </div>
           </div>
+          {/* ======= /Schedule Change Request Form ======= */}
         </div>
       </div>
     );
   }
 
-  // ===================== BILLING TAB (visible only when allowed) =====================
+  /* ===================== BILLING TAB (visible only when allowed) ===================== */
   if (activeTab === "billing" && !hideBilling) {
     return (
       <div>
@@ -501,7 +623,7 @@ export default function Dashboard() {
             )}
           </ul>
 
-          {/* Summary (hours remain) */}
+          {/* Summary (hours remaining) */}
           <div className="card mb-4">
             <div className="card-header">
               <h5 style={{ color: "white", margin: 0 }}>Account Balance Summary</h5>
@@ -539,11 +661,13 @@ export default function Dashboard() {
                 <table className="table table-striped table-sm">
                   <thead>
                     <tr>
-                      <th style={{ width: 130 }}>Date</th>
-                      <th>Student</th>
-                      <th>Event Type</th>
-                      <th>Attendance</th>
-                      <th className="text-end" style={{ width: 110 }}>Adjustment</th>
+                      {!cols.hideDate && <th style={{ width: 130 }}>Date</th>}
+                      {!cols.hideStudent && <th>Student</th>}
+                      {!cols.hideEventType && <th>Event Type</th>}
+                      {!cols.hideAttendance && <th>Attendance</th>}
+                      {!cols.hideAdjustment && (
+                        <th className="text-end" style={{ width: 110 }}>Adjustment</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -562,35 +686,49 @@ export default function Dashboard() {
 
                         return (
                           <tr key={index}>
-                            <td>{dateLabel}</td>
-                            <td>{detail.Student || "N/A"}</td>
-                            <td>{detail.EventType || "N/A"}</td>
-                            <td>{detail.Attendance || "N/A"}</td>
-                            <td className={`text-end ${adjClass}`}>
-                              {Number.isFinite(adjNum)
-                                ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
-                                : String(detail.Adjustment ?? 0)}
-                            </td>
+                            {!cols.hideDate && <td>{dateLabel}</td>}
+                            {!cols.hideStudent && <td>{detail.Student || "N/A"}</td>}
+                            {!cols.hideEventType && <td>{detail.EventType || "N/A"}</td>}
+                            {!cols.hideAttendance && <td>{detail.Attendance || "N/A"}</td>}
+                            {!cols.hideAdjustment && (
+                              <td className={`text-end ${adjClass}`}>
+                                {Number.isFinite(adjNum)
+                                  ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
+                                  : String(detail.Adjustment ?? 0)}
+                              </td>
+                            )}
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={5} className="text-center text-muted">No session records available.</td>
+                        <td colSpan={5} className="text-center text-muted">
+                          No session records available.
+                        </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
+
+                {/* If all columns are hidden, show a friendly message */}
+                {cols.hideDate &&
+                  cols.hideStudent &&
+                  cols.hideEventType &&
+                  cols.hideAttendance &&
+                  cols.hideAdjustment && (
+                    <div className="alert alert-info mt-3">
+                      Columns are hidden by your center. If you feel this is a mistake, please contact the center.
+                    </div>
+                  )}
               </div>
             </div>
           </div>
-
         </div>
       </div>
     );
   }
 
-  // ===================== HOME =====================
+  /* ===================== HOME ===================== */
   return (
     <div>
       {/* Header */}
@@ -684,7 +822,7 @@ export default function Dashboard() {
                     <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
                       {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
                     </h4>
-                    <p className="text-muted small mb-0">Hours remaining - Click to view billing details</p>
+                    <p className="text-muted small mb-0">Hours remaining</p>
                   </div>
                   <div className="text-end">
                     <i className="fas fa-hourglass" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
