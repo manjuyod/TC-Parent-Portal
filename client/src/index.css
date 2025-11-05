@@ -372,3 +372,64 @@ h3, h5 {
     font-size: 1rem;
   }
 }
+
+/* =========================
+   QoL Additions (append)
+   ========================= */
+
+/* Respect safe areas on mobile for the main container */
+.container {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* Make card headers sticky when we add className="card-header sticky-header" */
+.sticky-header {
+  position: sticky;
+  top: 0;           /* stays under the browser/nav bars */
+  z-index: 2;       /* above table body */
+}
+
+/* Tables: sticky header + smooth horizontal scroll on small screens */
+.table-container,
+.table-responsive {
+  overflow: auto;
+}
+
+/* Keep the header row visible while scrolling long tables */
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* Keep your existing brand color but ensure it's painted above rows */
+  background: var(--tutoring-blue);
+  color: #fff;
+}
+
+/* Comfortable tap targets & slightly rounder controls on mobile */
+.btn, .form-control, .form-select {
+  border-radius: 8px;
+}
+
+/* Focus accessibility */
+:focus-visible {
+  outline: 3px solid rgba(68, 114, 196, .35); /* based on --tutoring-blue */
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Reduce-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* Header layout breathes better on small screens */
+@media (max-width: 576px) {
+  .header-section .container > .d-flex {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: .5rem;
+  }
+  .header-title { font-size: 1.25rem; }
+  .table { font-size: 13px; } /* denser table text on phones */
+}

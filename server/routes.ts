@@ -45,66 +45,111 @@ declare module "express-session" {
 }
 
 /* ------------------------------------------------------------------ */
-/* Feature flag storage helpers                                       */
-/* JSON shape:
-   {
+/* Feature flags storage (wrapped structure)                           */
+/* {
      "franchises": {
-       "6": { "hideBilling": true, "hideHours": false },
-       "8": { "hideBilling": false, "hideHours": true }
+       "8": {
+         "hideBilling": false,
+         "hideHours": true,
+         "billingColumnVisibility": {
+           "hideDate": false,
+           "hideStudent": false,
+           "hideEventType": false,
+           "hideAttendance": false,
+           "hideAdjustment": false
+         }
+       }
      }
    }
 */
 /* ------------------------------------------------------------------ */
 
-type Flags = { hideBilling?: boolean; hideHours?: boolean };
-type FranchiseFlagsRecord = Record<string, Flags>;
+type BillingColumnVisibility = {
+  hideDate?: boolean;
+  hideStudent?: boolean;
+  hideEventType?: boolean;
+  hideAttendance?: boolean;
+  hideAdjustment?: boolean;
+};
+
+const DEFAULT_COLS: Required<BillingColumnVisibility> = {
+  hideDate: false,
+  hideStudent: false,
+  hideEventType: false,
+  hideAttendance: false,
+  hideAdjustment: false,
+};
+
+type Flags = {
+  hideBilling?: boolean;
+  hideHours?: boolean;
+  billingColumnVisibility?: BillingColumnVisibility;
+};
+
+type WrappedFlags = { franchises: Record<string, Flags> };
 
 async function ensureFlagsFile() {
   await fs.mkdir(FLAGS_DIR, { recursive: true });
   try {
     await fs.access(FLAGS_FILE);
   } catch {
-    const seed = { franchises: {} as FranchiseFlagsRecord };
+    const seed: WrappedFlags = { franchises: {} };
     await fs.writeFile(FLAGS_FILE, JSON.stringify(seed, null, 2), "utf-8");
   }
 }
 
-async function readFlags(): Promise<FranchiseFlagsRecord> {
-  await ensureFlagsFile();
-  try {
-    const raw = await fs.readFile(FLAGS_FILE, "utf-8");
-    const json = JSON.parse(raw);
-    if (json && typeof json === "object" && json.franchises && typeof json.franchises === "object") {
-      return json.franchises as FranchiseFlagsRecord;
-    }
-  } catch {
-    // ignore corrupt file; fall through to empty
-  }
-  return {};
+function normalizeFlags(f?: Flags): Required<Flags> {
+  return {
+    hideBilling: !!f?.hideBilling,
+    hideHours: !!f?.hideHours,
+    billingColumnVisibility: { ...DEFAULT_COLS, ...(f?.billingColumnVisibility ?? {}) },
+  };
 }
 
-async function writeFlags(
-  franchiseId: string,
-  patch: Partial<Flags>
-) {
+async function readFlags(): Promise<Record<string, Required<Flags>>> {
   await ensureFlagsFile();
-  let root: { franchises: FranchiseFlagsRecord } = { franchises: {} };
   try {
     const raw = await fs.readFile(FLAGS_FILE, "utf-8");
-    const json = JSON.parse(raw);
-    if (json && typeof json === "object") {
-      root = { franchises: (json.franchises ?? {}) as FranchiseFlagsRecord };
+    const json = JSON.parse(raw) as WrappedFlags;
+    const out: Record<string, Required<Flags>> = {};
+    for (const [fid, rec] of Object.entries(json.franchises || {})) {
+      out[fid] = normalizeFlags(rec);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function writeFlags(franchiseId: string, patch: Partial<Flags>) {
+  await ensureFlagsFile();
+  let wrapped: WrappedFlags = { franchises: {} };
+  try {
+    const raw = await fs.readFile(FLAGS_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as WrappedFlags;
+    if (parsed && typeof parsed === "object" && typeof parsed.franchises === "object") {
+      wrapped = parsed;
     }
   } catch {
-    // start fresh
+    wrapped = { franchises: {} };
   }
-  const cur = root.franchises[franchiseId] || {};
-  root.franchises[franchiseId] = {
-    ...cur,
-    ...(patch.hideBilling !== undefined ? { hideBilling: !!patch.hideBilling } : {}),
-    ...(patch.hideHours   !== undefined ? { hideHours:   !!patch.hideHours   } : {}),
+
+  const cur = normalizeFlags(wrapped.franchises[franchiseId] || {});
+  const next: Required<Flags> = {
+    hideBilling: typeof patch.hideBilling === "boolean" ? patch.hideBilling : cur.hideBilling,
+    hideHours: typeof patch.hideHours === "boolean" ? patch.hideHours : cur.hideHours,
+    billingColumnVisibility: { ...cur.billingColumnVisibility },
   };
-  await fs.writeFile(FLAGS_FILE, JSON.stringify(root, null, 2), "utf-8");
+
+  if (patch.billingColumnVisibility && typeof patch.billingColumnVisibility === "object") {
+    next.billingColumnVisibility = {
+      ...cur.billingColumnVisibility,
+      ...patch.billingColumnVisibility,
+    };
+  }
+
+  wrapped.franchises[franchiseId] = next;
+  await fs.writeFile(FLAGS_FILE, JSON.stringify(wrapped, null, 2), "utf-8");
 }
 
 /* ------------------------------------------------------------------ */
@@ -152,7 +197,7 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
 /* Route registration                                                  */
 /* ------------------------------------------------------------------ */
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Sessions
+  // Sessions (same-origin; if you change to cross-origin, add body parsers and CORS accordingly)
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "tutoring-club-secret",
@@ -211,7 +256,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Current parent
+  // Current parent  ✅ required by your parent dashboard
   app.get("/api/auth/me", requireParentAuth, async (req, res) => {
     try {
       const contactPhone = req.session.contactPhone!;
@@ -266,8 +311,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ---- Read feature flags and compute policy for this parent ----
       let hideBillingForParent = false;
       let hideHoursForParent = false;
+      let aggCols: Required<BillingColumnVisibility> = { ...DEFAULT_COLS };
+
       try {
-        const flags = await readFlags(); // { [fid]: { hideBilling, hideHours } }
+        const flags = await readFlags(); // { [fid]: { hideBilling, hideHours, billingColumnVisibility } }
         const franchiseIds = Array.from(
           new Set(
             (studentsInfo || [])
@@ -276,8 +323,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .map((v: any) => String(v))
           )
         );
+
         hideBillingForParent = franchiseIds.some((fid) => !!flags[fid]?.hideBilling);
         hideHoursForParent   = franchiseIds.some((fid) => !!flags[fid]?.hideHours);
+
+        for (const fid of franchiseIds) {
+          const rec = flags[fid];
+          const cols = rec?.billingColumnVisibility ?? DEFAULT_COLS;
+          aggCols = {
+            hideDate: !!(aggCols.hideDate || cols.hideDate),
+            hideStudent: !!(aggCols.hideStudent || cols.hideStudent),
+            hideEventType: !!(aggCols.hideEventType || cols.hideEventType),
+            hideAttendance: !!(aggCols.hideAttendance || cols.hideAttendance),
+            hideAdjustment: !!(aggCols.hideAdjustment || cols.hideAdjustment),
+          };
+        }
       } catch (e) {
         console.warn("[dashboard] readFlags failed, default visible:", e);
       }
@@ -308,14 +368,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return (a.TimeID ?? 0) - (b.TimeID ?? 0);
       });
 
-      // Normalize to ISO for client date-only rendering
-      const sessionsOut = allSessions.map((s) => ({
-        ...s,
-        ScheduleDateISO:
-          s.ScheduleDate instanceof Date
-            ? s.ScheduleDate.toISOString()
-            : new Date(String(s.ScheduleDate)).toISOString(),
-      }));
+      // Normalize to ISO for client date-only rendering (tolerate invalid dates)
+      const sessionsOut = allSessions
+        .map((s) => {
+          let iso: string | null = null;
+          if (s?.ScheduleDate instanceof Date) {
+            iso = !isNaN(s.ScheduleDate.getTime()) ? s.ScheduleDate.toISOString() : null;
+          } else {
+            const d = new Date(String(s?.ScheduleDate));
+            iso = !isNaN(d.getTime()) ? d.toISOString() : null;
+          }
+          return { ...s, ScheduleDateISO: iso };
+        })
+        .filter((s) => s.ScheduleDateISO !== null);
 
       // Next upcoming per student
       const now = new Date();
@@ -372,7 +437,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           : null,
         transactions: [],
-        uiPolicy: { hideBilling: hideBillingForParent, hideHours: hideHoursForParent },
+        uiPolicy: {
+          hideBilling: hideBillingForParent,
+          hideHours: hideHoursForParent,
+          billingColumnVisibility: aggCols,
+        },
       });
     } catch (error) {
       console.error("Dashboard error:", error);
@@ -416,6 +485,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const sid = Number(req.query.studentId);
       if (!Number.isFinite(sid)) return res.status(400).json({ message: "studentId required" });
+
       const email = await resolveCenterEmailForStudent(sid);
       res.json({ centerEmail: email || null });
     } catch (e: any) {
@@ -491,31 +561,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const fid = String(req.session.adminFranchiseId!);
       const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false, hideHours: false };
+      const rec = all[fid] || normalizeFlags({});
       res.json({
         franchiseId: fid,
-        hideBilling: !!rec.hideBilling,
-        hideHours: !!rec.hideHours,
+        hideBilling: rec.hideBilling,
+        hideHours: rec.hideHours,
+        billingColumnVisibility: rec.billingColumnVisibility,
       });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to read flags" });
     }
   });
 
-  // Accepts any subset of { hideBilling, hideHours }
+  // Accepts any subset of { hideBilling, hideHours, billingColumnVisibility }
   app.post("/api/admin/flags", requireAdminAuth, async (req, res) => {
     try {
       const fid = String(req.session.adminFranchiseId!);
       const patch: Partial<Flags> = {};
 
-      if (req.body?.hideBilling !== undefined) patch.hideBilling = !!req.body.hideBilling;
-      if (req.body?.hideHours !== undefined)   patch.hideHours   = !!req.body.hideHours;
+      // direct booleans
+      if (typeof req.body?.hideBilling === "boolean") patch.hideBilling = !!req.body.hideBilling;
+      if (typeof req.body?.hideHours === "boolean")   patch.hideHours   = !!req.body.hideHours;
+
+      // nested object (full or partial)
+      if (req.body?.billingColumnVisibility && typeof req.body.billingColumnVisibility === "object") {
+        const bc = req.body.billingColumnVisibility as BillingColumnVisibility;
+        const nextCols: BillingColumnVisibility = {};
+        if (typeof bc.hideDate === "boolean") nextCols.hideDate = bc.hideDate;
+        if (typeof bc.hideStudent === "boolean") nextCols.hideStudent = bc.hideStudent;
+        if (typeof bc.hideEventType === "boolean") nextCols.hideEventType = bc.hideEventType;
+        if (typeof bc.hideAttendance === "boolean") nextCols.hideAttendance = bc.hideAttendance;
+        if (typeof bc.hideAdjustment === "boolean") nextCols.hideAdjustment = bc.hideAdjustment;
+        patch.billingColumnVisibility = nextCols;
+      }
 
       // also support { policy: { ... } } (back-compat)
       if (req.body?.policy && typeof req.body.policy === "object") {
         const p = req.body.policy;
-        if (p.hideBilling !== undefined) patch.hideBilling = !!p.hideBilling;
-        if (p.hideHours   !== undefined) patch.hideHours   = !!p.hideHours;
+        if (typeof p.hideBilling === "boolean") patch.hideBilling = !!p.hideBilling;
+        if (typeof p.hideHours === "boolean")   patch.hideHours   = !!p.hideHours;
       }
 
       if (Object.keys(patch).length === 0) {
@@ -524,13 +608,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await writeFlags(fid, patch);
       const all = await readFlags();
-      const rec = all[fid] || { hideBilling: false, hideHours: false };
+      const rec = all[fid] || normalizeFlags({});
       res.json({
         franchiseId: fid,
-        hideBilling: !!rec.hideBilling,
-        hideHours: !!rec.hideHours,
+        hideBilling: rec.hideBilling,
+        hideHours: rec.hideHours,
+        billingColumnVisibility: rec.billingColumnVisibility,
       });
     } catch (e: any) {
+      console.error("Failed to update flags:", e);
       res.status(500).json({ message: e?.message || "Failed to update flags" });
     }
   });
