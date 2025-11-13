@@ -22,6 +22,26 @@ const DEFAULT_COLS: Required<BillingColumnVisibility> = {
   hideAdjustment: false,
 };
 
+/* Safer JSON fetch (catches accidental HTML from SPA fallbacks) */
+async function getJSON<T>(url: string): Promise<T> {
+  const r = await fetch(url, { credentials: "include" });
+  const text = await r.text();
+
+  const head = text.trim().slice(0, 20).toLowerCase();
+  if (head.startsWith("<!doctype") || head.startsWith("<html")) {
+    throw new Error(`Got HTML instead of JSON from ${url}. Check API path/server.`);
+  }
+  if (!r.ok) {
+    try {
+      const j = JSON.parse(text);
+      throw new Error(j?.message || `GET ${url} failed (${r.status})`);
+    } catch {
+      throw new Error(text || `GET ${url} failed (${r.status})`);
+    }
+  }
+  return JSON.parse(text) as T;
+}
+
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -177,6 +197,34 @@ export default function Dashboard() {
       .slice(0, 30);
   }, [billingRows]);
 
+  // ------------------- Reviews fetch (Today + This Week) -------------------
+  type ReviewRow = {
+    SessionID: number;
+    SessionDateISO: string;
+    CoveredMaterialsScore: number | null;
+    CoveredMaterialsText: string | null;
+    StudentAttitudeText: string | null;
+    OtherFeedback: string | null;
+  };
+  type WeeklyReviewsResp = { rows: ReviewRow[]; total: number; fromDate: string; toDate: string };
+
+  const selectedStudentId: number | null = useMemo(() => {
+    if (!selectedStudent) return null;
+    const s = students.find((x: any) => x.name === selectedStudent);
+    return s ? Number(s.id) : null;
+  }, [selectedStudent, students]);
+
+  const {
+    data: weeklyReviews,
+    isLoading: reviewsLoading,
+    error: reviewsError,
+  } = useQuery<WeeklyReviewsResp>({
+    queryKey: ["/api/students", selectedStudentId, "reviews", "week"],
+    enabled: selectedStudentId != null,
+    queryFn: () =>
+      getJSON<WeeklyReviewsResp>(`/api/students/${selectedStudentId}/reviews/week`),
+  });
+
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -262,6 +310,28 @@ export default function Dashboard() {
     else openGmailCompose(to);
   }
 
+  /* -------- Quick Actions inline (under Logout) -------- */
+  function QuickActionsInline() {
+    return (
+      <div className="mt-2 d-flex gap-2 flex-wrap justify-content-end">
+        <button className="btn btn-sm btn-primary" onClick={() => setActiveTab("schedule")}>
+          <i className="fas fa-calendar-edit me-2"></i>
+          Request Schedule Change
+        </button>
+        {!hideBilling && (
+          <button className="btn btn-sm btn-outline-primary" onClick={() => setActiveTab("billing")}>
+            <img
+              src={billingIconPath}
+              alt="Billing Icon"
+              style={{ width: "14px", height: "14px", marginRight: "6px" }}
+            />
+            View Billing Details
+          </button>
+        )}
+      </div>
+    );
+  }
+
   if (!user || !dashboardData) {
     return (
       <div className="min-h-screen bg-gray-50 d-flex align-items-center justify-content-center">
@@ -297,6 +367,7 @@ export default function Dashboard() {
                 <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                   Logout
                 </button>
+                <QuickActionsInline />
               </div>
             </div>
           </div>
@@ -596,6 +667,7 @@ export default function Dashboard() {
                 <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                   Logout
                 </button>
+                <QuickActionsInline />
               </div>
             </div>
           </div>
@@ -747,6 +819,7 @@ export default function Dashboard() {
                 Students: {students.map((s: any) => s.name).join(", ")}
               </div>
               <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">Logout</button>
+              <QuickActionsInline />
             </div>
           </div>
         </div>
@@ -774,8 +847,108 @@ export default function Dashboard() {
           )}
         </ul>
 
+        {/* === Instructor Reviews (Today + This Week) === */}
+        <div className="mb-4">
+          <div className="card">
+            <div className="card-header">
+              <h5 className="m-0">
+                <i className="fas fa-comments me-2" aria-hidden="true"></i>
+                Here is what our tutors are saying about {selectedStudent}
+              </h5>
+            </div>
+            <div className="card-body">
+              {!selectedStudent ? (
+                <div className="alert alert-info">Select a student to view reviews.</div>
+              ) : reviewsLoading ? (
+                <div className="text-muted">Loading reviews…</div>
+              ) : reviewsError ? (
+                <div className="alert alert-danger">
+                  {(reviewsError as any)?.message || "Failed to load reviews"}
+                </div>
+              ) : (weeklyReviews?.rows?.length ?? 0) === 0 ? (
+                <div className="alert alert-secondary">No reviews for today or this week.</div>
+              ) : (
+                <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                  {(() => {
+                    const rows = weeklyReviews!.rows;
+                    const todayISO = new Date().toISOString().slice(0, 10);
+
+                    const todayRows = rows.filter(r => r.SessionDateISO === todayISO);
+                    const weekRows  = rows.filter(r => r.SessionDateISO !== todayISO);
+
+                    const formatDate = (iso: string) => {
+                      const d = new Date(iso + "T00:00:00");
+                      return d.toLocaleDateString("en-US", {
+                        year: "numeric", month: "long", day: "numeric"
+                      });
+                    };
+
+                    const Item = ({ r }: { r: ReviewRow }) => (
+                      <div className="mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
+                        <div className="d-flex justify-content-between align-items-start">
+                          <div>
+                            <div className="fw-semibold" style={{ color: "var(--tutoring-blue)" }}>
+                              {formatDate(r.SessionDateISO)}
+                            </div>
+      
+                          </div>
+                          {r.CoveredMaterialsScore != null && (
+                            <span className="badge bg-primary">Materials: {r.CoveredMaterialsScore}</span>
+                          )}
+                        </div>
+
+                        {r.CoveredMaterialsText && (
+                          <div className="mt-2">
+                            <div className="small text-uppercase text-muted">Covered Materials</div>
+                            <div>{r.CoveredMaterialsText}</div>
+                          </div>
+                        )}
+
+                        {r.StudentAttitudeText && (
+                          <div className="mt-2">
+                            <div className="small text-uppercase text-muted">Student Attitude</div>
+                            <div>{r.StudentAttitudeText}</div>
+                          </div>
+                        )}
+
+                        {r.OtherFeedback && (
+                          <div className="mt-2">
+                            <div className="small text-uppercase text-muted">Other Feedback</div>
+                            <div>{r.OtherFeedback}</div>
+                          </div>
+                        )}
+                      </div>
+                    );
+
+                    return (
+                      <>
+                        {todayRows.length > 0 && (
+                          <>
+                            <div className="mb-2">
+                              <span className="badge bg-warning text-dark">Today</span>
+                            </div>
+                            {todayRows.map((r, i) => <Item key={`t-${i}`} r={r} />)}
+                          </>
+                        )}
+
+                        {weekRows.length > 0 && (
+                          <>
+                            {todayRows.length > 0 && <div className="mt-2 mb-2 small text-muted">Earlier this week</div>}
+                            {weekRows.map((r, i) => <Item key={`w-${i}`} r={r} />)}
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Stats Grid */}
         <div className="row mb-4">
+          {/* Left: Student selector */}
           <div className="col-md-6 mb-3">
             <div className="card">
               <div className="card-body d-flex justify-content-between align-items-start">
@@ -809,8 +982,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {!hideHours && (
-            <div className="col-md-6 mb-3">
+          {/* Right: Account Balance (Quick Actions now live in header) */}
+          <div className="col-md-6 mb-3">
+            {!hideHours && (
               <div
                 className="card"
                 style={{ cursor: "pointer", transition: "transform 0.2s ease" }}
@@ -820,7 +994,10 @@ export default function Dashboard() {
                   <div>
                     <p className="text-muted mb-1 small text-uppercase">Account Balance</p>
                     <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
-                      {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
+                      {typeof billing?.remaining_hours === "number"
+                        ? billing.remaining_hours.toFixed(1)
+                        : "0.0"}{" "}
+                      hours
                     </h4>
                     <p className="text-muted small mb-0">Hours remaining</p>
                   </div>
@@ -829,14 +1006,14 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Main Dashboard Grid */}
+        {/* Main Dashboard Grid (Recent + Upcoming) */}
         <div className="row">
           {/* Recent Sessions (last 30 days) */}
-          <div className="col-lg-4 mb-4">
+          <div className="col-lg-6 mb-4">
             <div className="card">
               <div className="card-header">
                 <h6>
@@ -877,7 +1054,7 @@ export default function Dashboard() {
           </div>
 
           {/* Upcoming Sessions (cap 4) */}
-          <div className="col-lg-4 mb-4">
+          <div className="col-lg-6 mb-4">
             <div className="card">
               <div className="card-header">
                 <h6>
@@ -919,36 +1096,6 @@ export default function Dashboard() {
                     <div className="alert alert-info small">No upcoming sessions found for {selectedStudent}.</div>
                   ) : (
                     <div className="alert alert-info small">Select a student to view upcoming sessions.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="col-lg-4 mb-4">
-            <div className="card">
-              <div className="card-header">
-                <h6>
-                  <i className="fas fa-bolt" style={{ marginRight: "8px" }}></i>
-                  Quick Actions
-                </h6>
-              </div>
-              <div className="card-body">
-                <div className="d-grid gap-2">
-                  <button className="btn btn-primary" onClick={() => setActiveTab("schedule")}>
-                    <i className="fas fa-calendar-edit me-2"></i>
-                    Request Schedule Change
-                  </button>
-                  {!hideBilling && (
-                    <button className="btn btn-outline-primary" onClick={() => setActiveTab("billing")}>
-                      <img
-                        src={billingIconPath}
-                        alt="Billing Icon"
-                        style={{ width: "16px", height: "16px", marginRight: "8px" }}
-                      />
-                      View Billing Details
-                    </button>
                   )}
                 </div>
               </div>

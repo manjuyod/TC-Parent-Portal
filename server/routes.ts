@@ -12,6 +12,7 @@ import {
   getHoursBalance,
   getSessions,
   submitScheduleChangeRequest,
+  getStudentReviews,              
 } from "./sqlServerStorage";
 import { getPool, sql } from "./db";
 
@@ -191,6 +192,23 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
     return email && String(email).trim() ? String(email).trim() : null;
   }
   return null;
+}
+
+/* --------------------- Small date helpers for reviews --------------------- */
+function yyyymmdd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function startOfWeekMonday(today = new Date()): Date {
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dow = d.getDay(); // 0=Sun..6=Sat
+  const delta = (dow + 6) % 7; // days since Monday
+  d.setDate(d.getDate() - delta);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
 /* ------------------------------------------------------------------ */
@@ -449,6 +467,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /* ====================== Reviews (Today + This Week) ====================== */
+
+  app.get("/api/students/:studentId/reviews/week", requireParentAuth, async (req, res) => {
+    try {
+      const sid = Number(req.params.studentId);
+      if (!Number.isFinite(sid)) return res.status(400).json({ message: "Invalid studentId" });
+
+      // authorization guard: only students linked to this parent
+      const studentIds = (req.session.studentIds || []).map(Number);
+      if (!studentIds.includes(sid)) {
+        return res.status(403).json({ message: "Unauthorized access to student" });
+      }
+
+      // Monday -> tomorrow (include "today")
+      const today = new Date();
+      const monday = startOfWeekMonday(today);
+      const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+      const fromDate = yyyymmdd(monday);
+      const toDate   = yyyymmdd(tomorrow);
+
+      const { rows, total } = await getStudentReviews(sid, {
+        fromDate,
+        toDate,
+        offset: 0,
+        limit: 50,
+      });
+
+      res.json({ rows, total, fromDate, toDate });
+    } catch (e: any) {
+      console.error("[/api/students/:id/reviews/week] error:", e);
+      res.status(500).json({ message: "Failed to load reviews" });
+    }
+  });
+
   /* ============================ Schedule change (keep stub) ============================ */
 
   app.post("/api/schedule-change-request", requireParentAuth, async (req, res) => {
@@ -496,7 +549,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   /* ============================ Admin Auth ============================ */
 
-  // Admin login (email + password from dbo.tblUsers; map to franchise via dpinkney_TC.dbo.tblFranchies.FranchiesEmail)
+  // Admin login
   app.post("/api/admin/login", async (req, res) => {
     try {
       const { email, password } = req.body || {};
