@@ -160,12 +160,10 @@ export async function getSessions(studentId: number | string) {
     `);
 
     const rows = rs.recordset as any[];
-    const now = new Date();
 
     const mapped = await Promise.all(
       rows.map(async (row) => {
         const dateISO: string = String(row.ScheduleDateISO); // yyyy-mm-dd
-        // Create a local date at midnight (no timezone surprises)
         const d = new Date(`${dateISO}T00:00:00`);
         const day =
           (row.DayRaw && String(row.DayRaw).trim()) ||
@@ -180,7 +178,7 @@ export async function getSessions(studentId: number | string) {
           Day: day ?? null,
           TimeID: row.TimeID,
           Time: timeStr ?? "Unknown",
-          category: (!isNaN(d.getTime()) && d < now) ? "recent" : "upcoming",
+          category: (!isNaN(d.getTime()) && d < new Date()) ? "recent" : "upcoming",
           FormattedDate: !isNaN(d.getTime())
             ? d.toLocaleDateString("en-US", {
                 weekday: "long",
@@ -265,6 +263,86 @@ export async function getHoursBalance(inquiryId: number | string) {
   }
 }
 
+/* ------------------------ Student Reviews (tblStudentFeedback) ------------------------ */
+/**
+ * Pulls session feedback for a given student within an optional [fromDate, toDate) window.
+
+ */
+export async function getStudentReviews(
+  studentId: number | string,
+  opts?: { offset?: number; limit?: number; fromDate?: string; toDate?: string }
+): Promise<{ rows: any[]; total: number }> {
+  const sid = coerceInt(studentId);
+  const offset = Math.max(0, Number(opts?.offset ?? 0));
+  const limit = Math.min(100, Math.max(1, Number(opts?.limit ?? 50)));
+
+  const pool = await getPool();
+
+  const hasFrom = typeof opts?.fromDate === "string" && !!opts!.fromDate;
+  const hasTo   = typeof opts?.toDate   === "string" && !!opts!.toDate;
+
+  const dateWhere = hasFrom && hasTo
+    ? "AND CAST(s.ScheduleDate AS date) >= @fromDate AND CAST(s.ScheduleDate AS date) < @toDate"
+    : hasFrom
+      ? "AND CAST(s.ScheduleDate AS date) >= @fromDate"
+      : hasTo
+        ? "AND CAST(s.ScheduleDate AS date) < @toDate"
+        : "";
+
+
+  const countReq = pool.request();
+  countReq.input("sid", sql.Int, sid);
+  if (hasFrom) countReq.input("fromDate", sql.Date, opts!.fromDate);
+  if (hasTo)   countReq.input("toDate",   sql.Date, opts!.toDate);
+
+  const countSql = `
+    SELECT COUNT(*) AS Total
+    FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+    INNER JOIN dpinkney_TC.dbo.tblStudentFeedback AS f
+      ON f.SessionID = s.ID
+    WHERE s.StudentId1 = @sid
+      ${dateWhere}
+  `;
+  const total = Number((await countReq.query(countSql)).recordset?.[0]?.Total ?? 0);
+
+
+  const rowsReq = pool.request();
+  rowsReq.input("sid", sql.Int, sid);
+  if (hasFrom) rowsReq.input("fromDate", sql.Date, opts!.fromDate);
+  if (hasTo)   rowsReq.input("toDate",   sql.Date, opts!.toDate);
+  rowsReq.input("offset", sql.Int, offset);
+  rowsReq.input("limit",  sql.Int, limit);
+
+  const rowsSql = `
+    SELECT
+      s.ID AS SessionID,
+      CONVERT(varchar(10), CAST(s.ScheduleDate AS date), 23) AS SessionDateISO, -- YYYY-MM-DD
+      f.CoverdstudentMaterials        AS CoveredMaterialsScore,
+      f.CoverdstudentMaterials_Text   AS CoveredMaterialsText,
+      f.studentattitude_Text          AS StudentAttitudeText,
+      f.OtherFeedback                 AS OtherFeedback
+    FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+    INNER JOIN dpinkney_TC.dbo.tblStudentFeedback AS f
+      ON f.SessionID = s.ID
+    WHERE s.StudentId1 = @sid
+      ${dateWhere}
+    ORDER BY CAST(s.ScheduleDate AS date) DESC, s.ID DESC
+    OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+  `;
+  const rs = await rowsReq.query(rowsSql);
+
+  const rows = (rs.recordset || []).map((r: any) => ({
+    SessionID: Number(r.SessionID),
+    SessionDateISO: String(r.SessionDateISO),
+    CoveredMaterialsScore: r.CoveredMaterialsScore != null ? Number(r.CoveredMaterialsScore) : null,
+    CoveredMaterialsText: r.CoveredMaterialsText ?? null,
+    StudentAttitudeText: r.StudentAttitudeText ?? null,
+    OtherFeedback: r.OtherFeedback ?? null,
+  }));
+
+  return { rows, total };
+}
+
 /* ------------------------ High-level search (compat) ------------------------ */
 export async function searchStudent(email: string, contactNum: string) {
   try {
@@ -331,7 +409,7 @@ export async function verifyAdminCredentials(
       U.[email]           AS Email,
       F.[ID]              AS FranchiseID
     FROM dbo.tblUsers AS U
-    LEFT JOIN dbo.tblFranchies AS F
+    LEFT JOIN dpinkney_TC.dbo.tblFranchies AS F
       ON F.[FranchiesEmail] = U.[email] COLLATE SQL_Latin1_General_CP1_CI_AS
     WHERE U.[email] = @email COLLATE SQL_Latin1_General_CP1_CI_AS
       AND U.[Password] = @pwd
