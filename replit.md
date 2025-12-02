@@ -14,6 +14,11 @@ Preferred communication style: Simple, everyday language.
 - Implemented SQL Server storage functions with error handling for stored procedures
 - Added Tutoring Club branding with official logo and color scheme
 
+## Recent Changes (December 2025)
+- Home dashboard student selector and Schedule Change form student selector now stay in sync; choosing a student in either place updates the other and drives the displayed data.
+- Schedule Change form prevents submitting a past date/time and nudges the time picker forward when the selected date is today.
+- "Current Session" field now shows a light-themed dropdown of upcoming sessions for the selected student with type-to-filter.
+
 # System Architecture
 
 ## Frontend Architecture
