@@ -1,51 +1,51 @@
+// src/App.tsx
 import { Switch, Route, useLocation } from "wouter";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { queryClient, getQueryFn } from "@/lib/queryClient";
 import React from "react";
+
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
+import DashboardAdmin from "@/pages/dashboardAdmin";
+import LoginAdmin from "@/pages/loginAdmin";
 
+/** Parent gate */
 function AuthCheck({ children }: { children: React.ReactNode }) {
   const [location, navigate] = useLocation();
-  
-  const { data: user, isLoading } = useQuery({
-    queryKey: ["/api/auth/me"],
+  const { data: user, isLoading } = useQuery({ queryKey: ["/api/auth/me"], retry: false });
+
+  React.useEffect(() => {
+    if (isLoading) return;
+    if (!user && location !== "/login") navigate("/login");
+    else if (user && location === "/login") navigate("/");
+  }, [user, isLoading, location, navigate]);
+
+  if (isLoading) return null;
+  if (!user && location !== "/login") return null;
+  if (user && location === "/login") return null;
+  return <>{children}</>;
+}
+
+/** Admin gate (returns null on 401 instead of throwing) */
+function AdminAuthCheck({ children }: { children: React.ReactNode }) {
+  const [location, navigate] = useLocation();
+  const { data: admin, isLoading } = useQuery({
+    queryKey: ["/api/admin/me"],
+    queryFn: getQueryFn({ on401: "returnNull" }),
     retry: false,
   });
 
-  // Always call useEffect at the top level
   React.useEffect(() => {
-    if (!isLoading) {
-      if (!user && location !== "/login") {
-        navigate("/login");
-      } else if (user && location === "/login") {
-        navigate("/");
-      }
-    }
-  }, [user, location, navigate, isLoading]);
+    if (isLoading) return;
+    if (!admin && location !== "/admin-login") navigate("/admin-login");
+    else if (admin && location === "/admin-login") navigate("/admin");
+  }, [admin, isLoading, location, navigate]);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-tutoring-blue mx-auto mb-4"></div>
-          <p className="text-text-light">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user && location !== "/login") {
-    return null;
-  }
-
-  if (user && location === "/login") {
-    return null;
-  }
+  if (isLoading) return null;
+  // Do not block /admin once authenticated
+  if (!admin && location !== "/admin-login") return null;
+  if (admin && location === "/admin-login") return null;
 
   return <>{children}</>;
 }
@@ -53,26 +53,33 @@ function AuthCheck({ children }: { children: React.ReactNode }) {
 function Router() {
   return (
     <Switch>
+      {/* Public */}
       <Route path="/login" component={Login} />
+      <Route path="/admin-login" component={LoginAdmin} />
+
+      {/* Admin-only */}
+      <Route path="/admin">
+        <AdminAuthCheck>
+          <DashboardAdmin />
+        </AdminAuthCheck>
+      </Route>
+
+      {/* Parent-only */}
       <Route path="/">
         <AuthCheck>
           <Dashboard />
         </AuthCheck>
       </Route>
+
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-function App() {
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <Router />
     </QueryClientProvider>
   );
 }
-
-export default App;

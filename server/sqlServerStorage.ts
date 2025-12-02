@@ -1,40 +1,7 @@
 // server/sqlServerStorage.ts
 import { getPool, sql } from "./db";
 
-/* ======================================================================== */
-/* Generic TTL cache (in-memory, process-local)                              */
-/* ======================================================================== */
-class TTLCache<K, V> {
-  private map = new Map<K, { value: V; expires: number }>();
-  constructor(private ttlMs: number, private maxEntries = 500) {}
-  get(key: K): V | undefined {
-    const e = this.map.get(key);
-    if (!e) return undefined;
-    if (Date.now() > e.expires) {
-      this.map.delete(key);
-      return undefined;
-    }
-    // LRU refresh
-    this.map.delete(key);
-    this.map.set(key, e);
-    return e.value;
-  }
-  set(key: K, value: V) {
-    const entry = { value, expires: Date.now() + this.ttlMs };
-    if (this.map.has(key)) this.map.delete(key);
-    this.map.set(key, entry);
-    if (this.map.size > this.maxEntries) {
-      const oldestKey = this.map.keys().next().value;
-      this.map.delete(oldestKey);
-    }
-  }
-  delete(key: K) { this.map.delete(key); }
-  clear() { this.map.clear(); }
-}
-
-/* ======================================================================== */
-/* Helpers                                                                   */
-/* ======================================================================== */
+/* ------------------------ Helpers ------------------------ */
 
 function normalizePhone10(input: string): string | null {
   const digits = String(input || "").replace(/\D/g, "");
@@ -48,191 +15,181 @@ function coerceInt(v: number | string): number {
   return n;
 }
 
-/* ======================================================================== */
-/* Smart caches                                                              */
-/* ======================================================================== */
+/* ------------------------ Simple TTL cache for time labels ------------------------ */
+class TTLCache<K, V> {
+  private map = new Map<K, { v: V; exp: number }>();
+  constructor(private ttlMs: number, private max = 512) {}
+  get(k: K): V | undefined {
+    const e = this.map.get(k);
+    if (!e) return undefined;
+    if (Date.now() > e.exp) {
+      this.map.delete(k);
+      return undefined;
+    }
+    return e.v;
+  }
+  set(k: K, v: V) {
+    this.map.set(k, { v, exp: Date.now() + this.ttlMs });
+    if (this.map.size > this.max) {
+      const [first] = this.map.keys();
+      this.map.delete(first);
+    }
+  }
+}
 
-// Cache for login lookups: key = `${emailLower}|${phone10}`
-type LoginCacheValue = { inquiry: any; students: any[] };
-const LOGIN_CACHE = new TTLCache<string, LoginCacheValue>(15 * 60 * 1000, 1000); // 15m
+const TIME_LABEL_CACHE = new TTLCache<number, string | null>(24 * 60 * 60 * 1000);
 
-// Time label cache (TimeID -> "h:mm AM/PM"). tblTimes changes rarely.
-const TIME_LABEL_CACHE = new TTLCache<number, string | null>(24 * 60 * 60 * 1000, 256); // 24h
-
-/* ======================================================================== */
-/* Python-style get_time: fetch HH:mm:ss and format to 'h:mm AM/PM'          */
-/* ======================================================================== */
+/**
+ * Read tblTimes as text (HH:mm:ss) and format to 'h:mm AM/PM' WITHOUT timezone drift.
+ */
 async function getTimeLabel(timeId: number): Promise<string | null> {
   const cached = TIME_LABEL_CACHE.get(timeId);
-  if (cached !== undefined) return cached; // return cached (even null)
+  if (cached !== undefined) return cached;
 
   const pool = await getPool();
   const req = pool.request();
   req.input("tid", sql.Int, timeId);
 
-  const result = await req.query(`
-    SELECT CONVERT(varchar(8), CAST([Time] AS time), 108) AS TimeHHMM
+  // 108 => HH:mm:ss string
+  const rs = await req.query(`
+    SELECT CONVERT(varchar(8), CAST([Time] AS time), 108) AS HHMMSS
     FROM dpinkney_TC.dbo.tblTimes
     WHERE ID = @tid
   `);
 
-  let formatted: string | null = null;
-  if (result.recordset.length) {
-    const hhmm = result.recordset[0].TimeHHMM as string; // "13:00:00"
-    const m = hhmm.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  let label: string | null = null;
+  if (rs.recordset.length) {
+    const hhmmss = String(rs.recordset[0].HHMMSS || ""); // e.g. "16:30:00"
+    const m = hhmmss.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
     if (m) {
       const h = parseInt(m[1], 10);
       const mins = parseInt(m[2], 10);
       const tmp = new Date();
       tmp.setHours(h, mins, 0, 0);
-      formatted = tmp.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }); // "1:00 PM"
+      label = tmp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }); // "4:30 PM"
     } else {
-      formatted = hhmm;
+      // fall back to raw
+      label = hhmmss;
     }
   }
 
-  TIME_LABEL_CACHE.set(timeId, formatted);
-  return formatted;
+  TIME_LABEL_CACHE.set(timeId, label);
+  return label;
 }
 
-/* Optional: manual login cache invalidation */
-export function invalidateLoginCache(email: string, contactNum: string) {
-  const phone10 = normalizePhone10(contactNum);
-  if (!phone10) return;
-  const key = `${String(email || "").trim().toLowerCase()}|${phone10}`;
-  LOGIN_CACHE.delete(key);
-}
-
-/* ======================================================================== */
-/* Change: One-round-trip login lookup (parent + students)                */
-/* ======================================================================== */
+/* ------------------------ Login lookup ------------------------ */
 /** Find Inquiry (parent) by email + phone and list linked students */
 export async function findInquiryByEmailAndPhone(email: string, contactNum: string) {
   try {
-    const phone10 = normalizePhone10(contactNum);
-    if (!phone10) return null;
-
-    const emailKey = String(email || "").trim().toLowerCase();
-    const cacheKey = `${emailKey}|${phone10}`;
-
-    // Try cache first (fast path)
-    const cached = LOGIN_CACHE.get(cacheKey);
-    if (cached) return cached;
-
-    // Single DB round-trip: resolve InquiryID, then parent + students as separate recordsets
     const pool = await getPool();
-    const req = pool.request();
-    req.input("email", sql.VarChar(256), email);
-    req.input("cleanPhone", sql.VarChar(16), phone10);
+    const request = pool.request();
 
-    const result = await req.query(`
-      DECLARE @inqId INT;
+    const normalized = normalizePhone10(contactNum);
+    if (!normalized) return null;
 
-      SELECT TOP 1 @inqId = I.ID
-      FROM dbo.tblInquiry AS I
-      WHERE I.Email = @email COLLATE SQL_Latin1_General_CP1_CI_AS
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(I.ContactPhone,' ',''),'-',''),'(',''),')',''),'+',''),'.','') = @cleanPhone;
-
-      -- Recordset 0: parent
+    const parentQuery = `
       SELECT ID AS InquiryID, Email, ContactPhone
       FROM dbo.tblInquiry
-      WHERE ID = @inqId;
+      WHERE Email = @email COLLATE SQL_Latin1_General_CP1_CI_AS
+        AND REPLACE(
+              REPLACE(
+                REPLACE(
+                  REPLACE(
+                    REPLACE(
+                      REPLACE(ContactPhone, ' ', ''),
+                    '-', ''),
+                  '(', ''),
+                ')', ''),
+              '+', ''),
+            '.', '') = @cleanPhone
+    `;
 
-      -- Recordset 1: students
-      SELECT ID, FirstName, LastName
-      FROM dbo.tblstudents
+    request.input("email", sql.VarChar(256), email);
+    request.input("cleanPhone", sql.VarChar(16), normalized);
+
+    const parentResult = await request.query(parentQuery);
+    if (parentResult.recordset.length === 0) return null;
+
+    const parent = parentResult.recordset[0];
+    const inquiryId = Number(parent.InquiryID);
+
+    const studentRequest = pool.request();
+    // IMPORTANT: match the parameter name used in the SQL (@inqId)
+    studentRequest.input("inqId", sql.Int, inquiryId);
+    const studentQuery = `
+      SELECT ID, FirstName, LastName, FranchiseID
+      FROM dbo.tblStudents
       WHERE InquiryID = @inqId
-      ORDER BY LastName, FirstName;
-    `);
+      ORDER BY LastName, FirstName
+    `;
+    const studentResult = await studentRequest.query(studentQuery);
 
-    const parent = result.recordsets?.[0]?.[0];
-    if (!parent) return null;
-
-    const students = result.recordsets?.[1] ?? [];
-    const value: LoginCacheValue = { inquiry: parent, students };
-
-    // Store in cache and return
-    LOGIN_CACHE.set(cacheKey, value);
-    return value;
+    return {
+      inquiry: parent,
+      students: studentResult.recordset,
+    };
   } catch (error) {
-    console.error("Error finding inquiry by email/phone (single round-trip):", error);
+    console.error("Error finding inquiry by email/phone:", error);
     throw error;
   }
 }
 
-/* ======================================================================== */
-/* Sessions (today → fallback ALL)                                           */
-/* (Kept for compat; formats Time via getTimeLabel() to avoid TZ drift.)     */
-/* ======================================================================== */
+/* ------------------------ Sessions (date-only for stability) ------------------------ */
+/**
+ * We fetch date-only (ISO) and TimeID, then format time with getTimeLabel().
+ * This avoids timezone drift (e.g., 4:30 PM becoming 8:30 AM) and wrong weekdays.
+ */
 export async function getSessions(studentId: number | string) {
   try {
     const sid = coerceInt(studentId);
     const pool = await getPool();
 
-    // 1) Today (per SQL Server time)
-    const reqToday = pool.request();
-    reqToday.input("sid", sql.Int, sid);
-    const rsToday = await reqToday.query(`
+    const req = pool.request();
+    req.input("sid", sql.Int, sid);
+
+    const rs = await req.query(`
       SELECT
-        s.StudentId1       AS StudentID,
-        s.ScheduleDate     AS ScheduleDate,
-        s.Day              AS DayRaw,
+        s.StudentId1 AS StudentID,
+        CAST(s.ScheduleDate AS date) AS ScheduleDateDate,
+        CONVERT(varchar(10), CAST(s.ScheduleDate AS date), 23) AS ScheduleDateISO, -- 'YYYY-MM-DD'
+        s.Day AS DayRaw,
         s.TimeID
       FROM dpinkney_TC.dbo.tblSessionSchedule AS s
       WHERE s.StudentId1 = @sid
-        AND CAST(s.ScheduleDate AS date) = CAST(GETDATE() AS date)
-      ORDER BY s.ScheduleDate ASC, s.TimeID ASC
+      ORDER BY CAST(s.ScheduleDate AS date) ASC, s.TimeID ASC
     `);
 
-    let rows = rsToday.recordset as any[];
+    const rows = rs.recordset as any[];
 
-    // 2) Fallback: ALL sessions
-    if (!rows.length) {
-      const reqAll = pool.request();
-      reqAll.input("sid", sql.Int, sid);
-      const rsAll = await reqAll.query(`
-        SELECT
-          s.StudentId1       AS StudentID,
-          s.ScheduleDate     AS ScheduleDate,
-          s.Day              AS DayRaw,
-          s.TimeID
-        FROM dpinkney_TC.dbo.tblSessionSchedule AS s
-        WHERE s.StudentId1 = @sid
-        ORDER BY s.ScheduleDate ASC, s.TimeID ASC
-      `);
-      rows = rsAll.recordset as any[];
-    }
+    const mapped = await Promise.all(
+      rows.map(async (row) => {
+        const dateISO: string = String(row.ScheduleDateISO); // yyyy-mm-dd
+        const d = new Date(`${dateISO}T00:00:00`);
+        const day =
+          (row.DayRaw && String(row.DayRaw).trim()) ||
+          d.toLocaleDateString("en-US", { weekday: "long" });
 
-    const now = new Date();
+        const timeStr = await getTimeLabel(Number(row.TimeID));
 
-    const mapped = await Promise.all(rows.map(async (row: any) => {
-      const d = row.ScheduleDate instanceof Date ? row.ScheduleDate : new Date(String(row.ScheduleDate));
-      const day = (row.DayRaw && String(row.DayRaw).trim())
-        ? row.DayRaw
-        : (!isNaN(d.getTime()) ? d.toLocaleDateString("en-US", { weekday: "long" }) : null);
-      const timeStr = await getTimeLabel(Number(row.TimeID));
-
-      return {
-        StudentID: row.StudentID,
-        ScheduleDate: d,
-        Day: day ?? null,
-        TimeID: row.TimeID,
-        Time: timeStr ?? "Unknown",
-        category: (!isNaN(d.getTime()) && d < now) ? "recent" : "upcoming",
-        FormattedDate: !isNaN(d.getTime())
-          ? d.toLocaleDateString("en-US", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })
-          : null,
-      };
-    }));
+        return {
+          StudentID: row.StudentID,
+          ScheduleDate: d, // kept for UI compatibility
+          ScheduleDateISO: dateISO, // stable
+          Day: day ?? null,
+          TimeID: row.TimeID,
+          Time: timeStr ?? "Unknown",
+          category: (!isNaN(d.getTime()) && d < new Date()) ? "recent" : "upcoming",
+          FormattedDate: !isNaN(d.getTime())
+            ? d.toLocaleDateString("en-US", {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })
+            : null,
+        };
+      })
+    );
 
     return mapped;
   } catch (error) {
@@ -241,9 +198,7 @@ export async function getSessions(studentId: number | string) {
   }
 }
 
-/* ======================================================================== */
-/* Billing (stored procedure)                                                */
-/* ======================================================================== */
+/* ------------------------ Billing (stored procedure) ------------------------ */
 export async function getHoursBalance(inquiryId: number | string) {
   try {
     const idNum = coerceInt(inquiryId);
@@ -308,9 +263,87 @@ export async function getHoursBalance(inquiryId: number | string) {
   }
 }
 
-/* ======================================================================== */
-/* High-level search (compat)                                                */
-/* ======================================================================== */
+/* ------------------------ Student Reviews (tblStudentFeedback) ------------------------ */
+/**
+ * Pulls session feedback for a given student within an optional [fromDate, toDate) window.
+
+ */
+export async function getStudentReviews(
+  studentId: number | string,
+  opts?: { offset?: number; limit?: number; fromDate?: string; toDate?: string }
+): Promise<{ rows: any[]; total: number }> {
+  const sid = coerceInt(studentId);
+  const offset = Math.max(0, Number(opts?.offset ?? 0));
+  const limit = Math.min(100, Math.max(1, Number(opts?.limit ?? 50)));
+
+  const pool = await getPool();
+
+  const hasFrom = typeof opts?.fromDate === "string" && !!opts!.fromDate;
+  const hasTo   = typeof opts?.toDate   === "string" && !!opts!.toDate;
+
+  const dateWhere = hasFrom && hasTo
+    ? "AND CAST(s.ScheduleDate AS date) >= @fromDate AND CAST(s.ScheduleDate AS date) < @toDate"
+    : hasFrom
+      ? "AND CAST(s.ScheduleDate AS date) >= @fromDate"
+      : hasTo
+        ? "AND CAST(s.ScheduleDate AS date) < @toDate"
+        : "";
+
+
+  const countReq = pool.request();
+  countReq.input("sid", sql.Int, sid);
+  if (hasFrom) countReq.input("fromDate", sql.Date, opts!.fromDate);
+  if (hasTo)   countReq.input("toDate",   sql.Date, opts!.toDate);
+
+  const countSql = `
+    SELECT COUNT(*) AS Total
+    FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+    INNER JOIN dpinkney_TC.dbo.tblStudentFeedback AS f
+      ON f.SessionID = s.ID
+    WHERE s.StudentId1 = @sid
+      ${dateWhere}
+  `;
+  const total = Number((await countReq.query(countSql)).recordset?.[0]?.Total ?? 0);
+
+
+  const rowsReq = pool.request();
+  rowsReq.input("sid", sql.Int, sid);
+  if (hasFrom) rowsReq.input("fromDate", sql.Date, opts!.fromDate);
+  if (hasTo)   rowsReq.input("toDate",   sql.Date, opts!.toDate);
+  rowsReq.input("offset", sql.Int, offset);
+  rowsReq.input("limit",  sql.Int, limit);
+
+  const rowsSql = `
+    SELECT
+      s.ID AS SessionID,
+      CONVERT(varchar(10), CAST(s.ScheduleDate AS date), 23) AS SessionDateISO, -- YYYY-MM-DD
+      f.CoverdstudentMaterials        AS CoveredMaterialsScore,
+      f.CoverdstudentMaterials_Text   AS CoveredMaterialsText,
+      f.studentattitude_Text          AS StudentAttitudeText,
+      f.OtherFeedback                 AS OtherFeedback
+    FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+    INNER JOIN dpinkney_TC.dbo.tblStudentFeedback AS f
+      ON f.SessionID = s.ID
+    WHERE s.StudentId1 = @sid
+      ${dateWhere}
+    ORDER BY CAST(s.ScheduleDate AS date) DESC, s.ID DESC
+    OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+  `;
+  const rs = await rowsReq.query(rowsSql);
+
+  const rows = (rs.recordset || []).map((r: any) => ({
+    SessionID: Number(r.SessionID),
+    SessionDateISO: String(r.SessionDateISO),
+    CoveredMaterialsScore: r.CoveredMaterialsScore != null ? Number(r.CoveredMaterialsScore) : null,
+    CoveredMaterialsText: r.CoveredMaterialsText ?? null,
+    StudentAttitudeText: r.StudentAttitudeText ?? null,
+    OtherFeedback: r.OtherFeedback ?? null,
+  }));
+
+  return { rows, total };
+}
+
+/* ------------------------ High-level search (compat) ------------------------ */
 export async function searchStudent(email: string, contactNum: string) {
   try {
     const inquiry = await findInquiryByEmailAndPhone(email, contactNum);
@@ -332,9 +365,7 @@ export async function searchStudent(email: string, contactNum: string) {
   }
 }
 
-/* ======================================================================== */
-/* Schedule change (keep original stub)                                      */
-/* ======================================================================== */
+/* ------------------------ Schedule change (stub) ------------------------ */
 export async function submitScheduleChangeRequest(requestData: {
   studentId: number;
   currentSession: string;
@@ -356,70 +387,47 @@ export async function submitScheduleChangeRequest(requestData: {
   }
 }
 
-/* ======================================================================== */
-/* Month-range Sessions (date-only, stable labels)                            */
-/* ======================================================================== */
-
-function monthRangeUTC(year: number, month1to12: number) {
-  const m = Math.min(12, Math.max(1, month1to12));
-  const start = new Date(Date.UTC(year, m - 1, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(year, m, 0, 23, 59, 59, 999)); // last day of month
-  const toISODate = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
-  return { startISO: toISODate(start), endISO: toISODate(end) };
-}
-
+/* ------------------------ Admin login (DB-backed) ------------------------ */
 /**
- * Fetch ALL sessions for a student in (year, month).
- * Pure DATE filtering in SQL; formats Time via getTimeLabel() + cache.
+ * Verifies admin by email + password against SQL Server (dbo.tblUsers).
+ * Then resolves franchise by matching that email to dbo.tblFranchies.FranchiesEmail.
+ *
+ * Returns { franchiseId, email } on success, or null on failure.
  */
-export async function getSessionsForMonth(studentId: number | string, year: number, month1to12: number) {
-  const sid = coerceInt(studentId);
-  const y = coerceInt(year);
-  const m = coerceInt(month1to12);
-  const { startISO, endISO } = monthRangeUTC(y, m);
+export async function verifyAdminCredentials(
+  email: string,
+  password: string
+): Promise<{ franchiseId: string; email: string } | null> {
+  const pool = await getPool();
+  const req = pool.request();
+  req.input("email", sql.VarChar(256), email);
+  req.input("pwd", sql.VarChar(256), password);
 
-  try {
-    const pool = await getPool();
-    const req = pool.request();
-    req.input("sid", sql.Int, sid);
-    req.input("d1", sql.Date, startISO);
-    req.input("d2", sql.Date, endISO);
+  // One round-trip: check user + resolve franchise by email
+  const rs = await req.query(`
+    SELECT TOP 1
+      U.[email]           AS Email,
+      F.[ID]              AS FranchiseID
+    FROM dbo.tblUsers AS U
+    LEFT JOIN dpinkney_TC.dbo.tblFranchies AS F
+      ON F.[FranchiesEmail] = U.[email] COLLATE SQL_Latin1_General_CP1_CI_AS
+    WHERE U.[email] = @email COLLATE SQL_Latin1_General_CP1_CI_AS
+      AND U.[Password] = @pwd
+  `);
 
-    const rs = await req.query(`
-      SELECT
-        s.StudentId1                       AS StudentID,
-        CAST(s.ScheduleDate AS date)       AS ScheduleDateDate,
-        CONVERT(varchar(10), CAST(s.ScheduleDate AS date), 23) AS ScheduleDateISO,
-        s.Day                              AS DayRaw,
-        s.TimeID
-      FROM dpinkney_TC.dbo.tblSessionSchedule AS s
-      WHERE s.StudentId1 = @sid
-        AND CAST(s.ScheduleDate AS date) BETWEEN @d1 AND @d2
-      ORDER BY CAST(s.ScheduleDate AS date) ASC, s.TimeID ASC
-   `);
-
-    const rows = rs.recordset as any[];
-    const mapped = await Promise.all(rows.map(async (row: any) => {
-      const dateISO = String(row.ScheduleDateISO);      // 'YYYY-MM-DD'
-      const dateObj = new Date(`${dateISO}T00:00:00`);
-      const day = (row.DayRaw && String(row.DayRaw).trim())
-        ? row.DayRaw
-        : dateObj.toLocaleDateString("en-US", { weekday: "long" });
-      const timeLabel = await getTimeLabel(Number(row.TimeID));
-
-      return {
-        StudentID: row.StudentID,
-        ScheduleDate: dateObj,        // keep for compat
-        ScheduleDateISO: dateISO,     // stable, no TZ drift
-        Day: day ?? null,
-        TimeID: row.TimeID,
-        Time: timeLabel ?? "Unknown",
-      };
-    }));
-
-    return mapped;
-  } catch (error) {
-    console.error("Error getSessionsForMonth:", error);
-    return [];
+  if (!rs.recordset.length) {
+    // No user/password match
+    return null;
   }
+
+  const row = rs.recordset[0];
+  const fid = row.FranchiseID != null ? String(row.FranchiseID) : null;
+
+  // Require that this admin email is linked to a franchise
+  if (!fid) return null;
+
+  return {
+    franchiseId: fid,
+    email: String(row.Email),
+  };
 }

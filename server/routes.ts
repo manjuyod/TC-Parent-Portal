@@ -1,65 +1,250 @@
-import type { Express } from "express";
+// server/routes.ts
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import session from "express-session";
+
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs/promises";
+
 import {
   findInquiryByEmailAndPhone,
   getHoursBalance,
-  getSessions, // kept for compatibility (unused by dashboard now)
+  getSessions,
   submitScheduleChangeRequest,
-  getSessionsForMonth, // NEW: month-aware fetch
+  getStudentReviews,              
 } from "./sqlServerStorage";
+import { getPool, sql } from "./db";
 
+/* ------------------------------------------------------------------ */
+/* ESM-safe __dirname + stable data path                               */
+/* ------------------------------------------------------------------ */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const isDist = path.basename(__dirname) === "dist";
+const SERVER_DIR = isDist ? path.join(__dirname, "..") : __dirname;
+
+const FLAGS_DIR = path.join(SERVER_DIR, "data");
+const FLAGS_FILE = path.join(FLAGS_DIR, "feature-flags.json");
+
+/* ------------------------------------------------------------------ */
+/* Session typing                                                     */
+/* ------------------------------------------------------------------ */
 declare module "express-session" {
   interface SessionData {
+    // parent session
     parentId?: string;
     inquiryId?: number;
     email?: string;
     contactPhone?: string;
     studentIds?: number[];
+
+    // admin session
+    adminEmail?: string;
+    adminFranchiseId?: string; // normalized string id
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Feature flags storage (wrapped structure)                           */
+/* {
+     "franchises": {
+       "8": {
+         "hideBilling": false,
+         "hideHours": true,
+         "billingColumnVisibility": {
+           "hideDate": false,
+           "hideStudent": false,
+           "hideEventType": false,
+           "hideAttendance": false,
+           "hideAdjustment": false
+         }
+       }
+     }
+   }
+*/
+/* ------------------------------------------------------------------ */
+
+type BillingColumnVisibility = {
+  hideDate?: boolean;
+  hideStudent?: boolean;
+  hideEventType?: boolean;
+  hideAttendance?: boolean;
+  hideAdjustment?: boolean;
+};
+
+const DEFAULT_COLS: Required<BillingColumnVisibility> = {
+  hideDate: false,
+  hideStudent: false,
+  hideEventType: false,
+  hideAttendance: false,
+  hideAdjustment: false,
+};
+
+type Flags = {
+  hideBilling?: boolean;
+  hideHours?: boolean;
+  billingColumnVisibility?: BillingColumnVisibility;
+};
+
+type WrappedFlags = { franchises: Record<string, Flags> };
+
+async function ensureFlagsFile() {
+  await fs.mkdir(FLAGS_DIR, { recursive: true });
+  try {
+    await fs.access(FLAGS_FILE);
+  } catch {
+    const seed: WrappedFlags = { franchises: {} };
+    await fs.writeFile(FLAGS_FILE, JSON.stringify(seed, null, 2), "utf-8");
+  }
+}
+
+function normalizeFlags(f?: Flags): Required<Flags> {
+  return {
+    hideBilling: !!f?.hideBilling,
+    hideHours: !!f?.hideHours,
+    billingColumnVisibility: { ...DEFAULT_COLS, ...(f?.billingColumnVisibility ?? {}) },
+  };
+}
+
+async function readFlags(): Promise<Record<string, Required<Flags>>> {
+  await ensureFlagsFile();
+  try {
+    const raw = await fs.readFile(FLAGS_FILE, "utf-8");
+    const json = JSON.parse(raw) as WrappedFlags;
+    const out: Record<string, Required<Flags>> = {};
+    for (const [fid, rec] of Object.entries(json.franchises || {})) {
+      out[fid] = normalizeFlags(rec);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function writeFlags(franchiseId: string, patch: Partial<Flags>) {
+  await ensureFlagsFile();
+  let wrapped: WrappedFlags = { franchises: {} };
+  try {
+    const raw = await fs.readFile(FLAGS_FILE, "utf-8");
+    const parsed = JSON.parse(raw) as WrappedFlags;
+    if (parsed && typeof parsed === "object" && typeof parsed.franchises === "object") {
+      wrapped = parsed;
+    }
+  } catch {
+    wrapped = { franchises: {} };
+  }
+
+  const cur = normalizeFlags(wrapped.franchises[franchiseId] || {});
+  const next: Required<Flags> = {
+    hideBilling: typeof patch.hideBilling === "boolean" ? patch.hideBilling : cur.hideBilling,
+    hideHours: typeof patch.hideHours === "boolean" ? patch.hideHours : cur.hideHours,
+    billingColumnVisibility: { ...cur.billingColumnVisibility },
+  };
+
+  if (patch.billingColumnVisibility && typeof patch.billingColumnVisibility === "object") {
+    next.billingColumnVisibility = {
+      ...cur.billingColumnVisibility,
+      ...patch.billingColumnVisibility,
+    };
+  }
+
+  wrapped.franchises[franchiseId] = next;
+  await fs.writeFile(FLAGS_FILE, JSON.stringify(wrapped, null, 2), "utf-8");
+}
+
+/* ------------------------------------------------------------------ */
+/* Middleware                                                          */
+/* ------------------------------------------------------------------ */
+
+function requireParentAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.parentId) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+  next();
+}
+
+function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.adminEmail || !req.session.adminFranchiseId) {
+    return res.status(401).json({ message: "Admin authentication required" });
+  }
+  next();
+}
+
+/* ------------------------------------------------------------------ */
+/* Center email resolver                                               */
+/* ------------------------------------------------------------------ */
+async function resolveCenterEmailForStudent(studentId: number): Promise<string | null> {
+  const pool = await getPool();
+  const q = pool.request();
+  q.input("sid", sql.Int, studentId);
+
+  // NOTE: table name is dpinkney_TC.dbo.tblFranchies with column FranchiesEmail
+  const rs = await q.query(`
+    SELECT TOP 1 F.FranchiesEmail AS CenterEmail
+    FROM dbo.tblstudents S
+    JOIN dpinkney_TC.dbo.tblFranchies F ON F.ID = S.FranchiseID
+    WHERE S.ID = @sid
+  `);
+
+  if (rs.recordset.length) {
+    const email: string | null = rs.recordset[0].CenterEmail ?? null;
+    return email && String(email).trim() ? String(email).trim() : null;
+  }
+  return null;
+}
+
+/* --------------------- Small date helpers for reviews --------------------- */
+function yyyymmdd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function startOfWeekMonday(today = new Date()): Date {
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dow = d.getDay(); // 0=Sun..6=Sat
+  const delta = (dow + 6) % 7; // days since Monday
+  d.setDate(d.getDate() - delta);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/* ------------------------------------------------------------------ */
+/* Route registration                                                  */
+/* ------------------------------------------------------------------ */
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Session middleware
+  // Sessions (same-origin; if you change to cross-origin, add body parsers and CORS accordingly)
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "tutoring-club-secret",
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: false, // Set to true in production with HTTPS
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        secure: false, // set to true behind HTTPS
+        maxAge: 24 * 60 * 60 * 1000,
       },
     })
   );
 
-  // Authentication middleware
-  const requireAuth = (req: any, res: any, next: any) => {
-    if (!req.session.parentId) {
-      return res.status(401).json({ message: "Authentication required" });
-    }
-    next();
-  };
+  /* ============================ Parent Auth ============================ */
 
-  // Login endpoint
+  // Parent login
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { email, contactPhone } = req.body;
-
+      const { email, contactPhone } = req.body || {};
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
       if (!inquiryData) {
         return res
           .status(401)
-          .json({
-            message:
-              "Invalid phone number. Please contact your tutoring center.",
-          });
+          .json({ message: "Invalid phone number. Please contact your tutoring center." });
       }
 
       const parentInfo = inquiryData.inquiry;
       const studentsInfo = inquiryData.students || [];
 
-      // Store session data (ensure numeric IDs)
+      // Save session
       req.session.email = email;
       req.session.contactPhone = contactPhone;
       req.session.inquiryId = Number(parentInfo.InquiryID);
@@ -81,31 +266,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Logout endpoint
+  // Parent logout
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Could not log out" });
-      }
+      if (err) return res.status(500).json({ message: "Could not log out" });
       res.json({ success: true });
     });
   });
 
-  // Get current user
-  app.get("/api/auth/me", requireAuth, async (req, res) => {
+  // Current parent  ✅ required by your parent dashboard
+  app.get("/api/auth/me", requireParentAuth, async (req, res) => {
     try {
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
-
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) {
-        return res.status(404).json({ message: "Parent not found" });
-      }
+      if (!inquiryData) return res.status(404).json({ message: "Parent not found" });
 
       const parentInfo = inquiryData.inquiry;
       const studentsInfo = inquiryData.students || [];
 
-      // keep session studentIds fresh
+      // refresh ids
       req.session.studentIds = studentsInfo.map((s: any) => Number(s.ID));
 
       res.json({
@@ -121,6 +301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           subject: "N/A",
           status: "active",
           progress: 0,
+          franchiseId: s.FranchiseID ?? null,
         })),
       });
     } catch (error) {
@@ -129,11 +310,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  /**
-   * NEW: Get dashboard data (month-aware; attach studentId/studentName; stable categorization)
-   * Query params (optional): ?year=2025&month=8  (month is 1-12)
-   */
-  app.get("/api/dashboard", requireAuth, async (req, res) => {
+  /* ============================ Parent Dashboard ============================ */
+
+  app.get("/api/dashboard", requireParentAuth, async (req, res) => {
     try {
       const inquiryIdNum = Number(req.session.inquiryId);
       if (!Number.isFinite(inquiryIdNum)) {
@@ -142,29 +321,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
-
-      // Optional query params with defaults to "now"
-      const now = new Date();
-      const qYear = Number(req.query.year ?? now.getFullYear());
-      const qMonth = Number(req.query.month ?? (now.getMonth() + 1)); // 1-12
-
-      // Get parent + students
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
-      if (!inquiryData) {
-        return res.status(404).json({ message: "Parent data not found" });
-      }
+      if (!inquiryData) return res.status(404).json({ message: "Parent data not found" });
+
       const studentsInfo = inquiryData.students || [];
 
-      // Fetch sessions for the requested month per student (parallel)
+      // ---- Read feature flags and compute policy for this parent ----
+      let hideBillingForParent = false;
+      let hideHoursForParent = false;
+      let aggCols: Required<BillingColumnVisibility> = { ...DEFAULT_COLS };
+
+      try {
+        const flags = await readFlags(); // { [fid]: { hideBilling, hideHours, billingColumnVisibility } }
+        const franchiseIds = Array.from(
+          new Set(
+            (studentsInfo || [])
+              .map((s: any) => s?.FranchiseID)
+              .filter((v: any) => v !== null && v !== undefined)
+              .map((v: any) => String(v))
+          )
+        );
+
+        hideBillingForParent = franchiseIds.some((fid) => !!flags[fid]?.hideBilling);
+        hideHoursForParent   = franchiseIds.some((fid) => !!flags[fid]?.hideHours);
+
+        for (const fid of franchiseIds) {
+          const rec = flags[fid];
+          const cols = rec?.billingColumnVisibility ?? DEFAULT_COLS;
+          aggCols = {
+            hideDate: !!(aggCols.hideDate || cols.hideDate),
+            hideStudent: !!(aggCols.hideStudent || cols.hideStudent),
+            hideEventType: !!(aggCols.hideEventType || cols.hideEventType),
+            hideAttendance: !!(aggCols.hideAttendance || cols.hideAttendance),
+            hideAdjustment: !!(aggCols.hideAdjustment || cols.hideAdjustment),
+          };
+        }
+      } catch (e) {
+        console.warn("[dashboard] readFlags failed, default visible:", e);
+      }
+
+      // Sessions per student (attach studentId/studentName)
       const perStudent = await Promise.all(
         studentsInfo.map(async (student: any) => {
           const sid = Number(student.ID);
           try {
-            const list = await getSessionsForMonth(sid, qYear, qMonth);
+            const list = await getSessions(sid);
             return (list || []).map((session: any) => ({
               ...session,
-              studentId: sid, // attach for UI
-              studentName: `${student.FirstName} ${student.LastName}`, // attach for UI
+              studentId: sid,
+              studentName: `${student.FirstName} ${student.LastName}`,
             }));
           } catch (e) {
             console.error("Error getting sessions for student:", sid, e);
@@ -173,28 +378,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
 
-      // Flatten and sort (by date-only then time)
+      // Flatten & sort
       const allSessions: any[] = ([] as any[]).concat(...perStudent).sort((a, b) => {
-        if (a.ScheduleDateISO !== b.ScheduleDateISO) {
-          return a.ScheduleDateISO < b.ScheduleDateISO ? -1 : 1;
-        }
+        const ad = new Date(a.ScheduleDate).getTime();
+        const bd = new Date(b.ScheduleDate).getTime();
+        if (ad !== bd) return ad - bd;
         return (a.TimeID ?? 0) - (b.TimeID ?? 0);
       });
 
-      // Categorize using date-only (avoid time zone drift)
-      const todayISO = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
-      const sessionsOut = allSessions.map((s) => ({
-        ...s,
-        category: s.ScheduleDateISO < todayISO ? "recent" : "upcoming",
-        FormattedDate: new Date(`${s.ScheduleDateISO}T00:00:00`).toLocaleDateString("en-US", {
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }),
-      }));
+      // Normalize to ISO for client date-only rendering (tolerate invalid dates)
+      const sessionsOut = allSessions
+        .map((s) => {
+          let iso: string | null = null;
+          if (s?.ScheduleDate instanceof Date) {
+            iso = !isNaN(s.ScheduleDate.getTime()) ? s.ScheduleDate.toISOString() : null;
+          } else {
+            const d = new Date(String(s?.ScheduleDate));
+            iso = !isNaN(d.getTime()) ? d.toISOString() : null;
+          }
+          return { ...s, ScheduleDateISO: iso };
+        })
+        .filter((s) => s.ScheduleDateISO !== null);
 
-      // Next upcoming per student (using date-only compare)
+      // Next upcoming per student
+      const now = new Date();
       const byStudent = new Map<number, any[]>();
       for (const s of sessionsOut) {
         const k = Number(s.studentId);
@@ -205,9 +412,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const students = studentsInfo.map((student: any) => {
         const sid = Number(student.ID);
         const list = byStudent.get(sid) || [];
-        const nextUpcoming = list.find((s) => s.category === "upcoming");
+        const nextUpcoming = list.find((s) => new Date(s.ScheduleDateISO) >= now);
         const nextSession = nextUpcoming
-          ? `${nextUpcoming.Day ?? new Date(`${nextUpcoming.ScheduleDateISO}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" })} ${nextUpcoming.Time ?? ""}`.trim() || "Scheduled"
+          ? `${
+              nextUpcoming.Day ??
+              new Date(nextUpcoming.ScheduleDateISO).toLocaleDateString("en-US", {
+                weekday: "long",
+              })
+            } ${nextUpcoming.Time ?? ""}`.trim() || "Scheduled"
           : "No sessions scheduled";
 
         return {
@@ -218,15 +430,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: "active",
           progress: 0,
           nextSession,
+          franchiseId: student.FranchiseID ?? null,
         };
       });
 
-      // Billing information (unchanged)
+      // Billing
       const billingInfo = await getHoursBalance(inquiryIdNum);
-      const sessionsThisMonth = sessionsOut.length;
+
+      // If hours are hidden, zero out remaining_hours so the client can’t accidentally show it
+      if (billingInfo && hideHoursForParent) {
+        (billingInfo as any).remaining_hours = null;
+      }
 
       res.json({
-        window: { year: qYear, month: qMonth },
         students,
         sessions: sessionsOut,
         billing: billingInfo
@@ -235,11 +451,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
               monthlyRate: "320.00",
               nextPaymentDate: "N/A",
               paymentMethod: "N/A",
-              sessionsThisMonth,
               ...billingInfo,
             }
           : null,
         transactions: [],
+        uiPolicy: {
+          hideBilling: hideBillingForParent,
+          hideHours: hideHoursForParent,
+          billingColumnVisibility: aggCols,
+        },
       });
     } catch (error) {
       console.error("Dashboard error:", error);
@@ -247,20 +467,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Submit schedule change request (kept original)
-  app.post("/api/schedule-change-request", requireAuth, async (req, res) => {
-    try {
-      const {
-        studentId,
-        currentSession,
-        preferredDate,
-        preferredTime,
-        requestedChange,
-        reason,
-      } = req.body;
-      const studentIds = req.session.studentIds || [];
+  /* ====================== Reviews (Today + This Week) ====================== */
 
-      // Verify the student belongs to the authenticated parent
+  app.get("/api/students/:studentId/reviews/week", requireParentAuth, async (req, res) => {
+    try {
+      const sid = Number(req.params.studentId);
+      if (!Number.isFinite(sid)) return res.status(400).json({ message: "Invalid studentId" });
+
+      // authorization guard: only students linked to this parent
+      const studentIds = (req.session.studentIds || []).map(Number);
+      if (!studentIds.includes(sid)) {
+        return res.status(403).json({ message: "Unauthorized access to student" });
+      }
+
+      // Monday -> tomorrow (include "today")
+      const today = new Date();
+      const monday = startOfWeekMonday(today);
+      const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+      const fromDate = yyyymmdd(monday);
+      const toDate   = yyyymmdd(tomorrow);
+
+      const { rows, total } = await getStudentReviews(sid, {
+        fromDate,
+        toDate,
+        offset: 0,
+        limit: 50,
+      });
+
+      res.json({ rows, total, fromDate, toDate });
+    } catch (e: any) {
+      console.error("[/api/students/:id/reviews/week] error:", e);
+      res.status(500).json({ message: "Failed to load reviews" });
+    }
+  });
+
+  /* ============================ Schedule change (keep stub) ============================ */
+
+  app.post("/api/schedule-change-request", requireParentAuth, async (req, res) => {
+    try {
+      const { studentId, currentSession, preferredDate, preferredTime, requestedChange, reason } =
+        req.body || {};
+      const studentIds = req.session.studentIds || [];
       if (!studentIds.includes(parseInt(studentId))) {
         return res.status(403).json({ message: "Unauthorized access to student" });
       }
@@ -277,7 +525,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((result as any).error) {
         return res.status(400).json({ message: (result as any).error });
       }
-
       res.json(result);
     } catch (error) {
       console.error("Schedule change request error:", error);
@@ -285,6 +532,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /* ============================ Center email (compose helper) ============================ */
+
+  app.get("/api/center-email", requireParentAuth, async (req, res) => {
+    try {
+      const sid = Number(req.query.studentId);
+      if (!Number.isFinite(sid)) return res.status(400).json({ message: "studentId required" });
+
+      const email = await resolveCenterEmailForStudent(sid);
+      res.json({ centerEmail: email || null });
+    } catch (e: any) {
+      console.error("center-email error:", e);
+      res.status(500).json({ message: "Failed to resolve center email" });
+    }
+  });
+
+  /* ============================ Admin Auth ============================ */
+
+  // Admin login
+  app.post("/api/admin/login", async (req, res) => {
+    try {
+      const { email, password } = req.body || {};
+      if (!email || !password) {
+        return res.status(400).json({ message: "email and password are required" });
+      }
+
+      const pool = await getPool();
+      const q = pool.request();
+      q.input("email", sql.VarChar(256), String(email).trim());
+      q.input("pwd", sql.VarChar(256), String(password)); // NOTE: legacy plain-text
+
+      const rs = await q.query(`
+        SELECT TOP 1
+          U.Email        AS AdminEmail,
+          F.ID           AS FranchiseID
+        FROM dbo.tblUsers AS U
+        LEFT JOIN dpinkney_TC.dbo.tblFranchies AS F
+          ON F.FranchiesEmail = U.Email
+        WHERE U.Email = @email COLLATE SQL_Latin1_General_CP1_CI_AS
+          AND U.[Password] = @pwd
+      `);
+
+      if (!rs.recordset.length) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const row = rs.recordset[0];
+      const adminEmail = String(row.AdminEmail || "").trim();
+      const franchiseId = row.FranchiseID != null ? String(row.FranchiseID) : "";
+
+      if (!franchiseId) {
+        return res.status(401).json({ message: "No franchise mapping for this admin email" });
+      }
+
+      req.session.adminEmail = adminEmail;
+      req.session.adminFranchiseId = franchiseId;
+
+      res.json({ success: true, franchiseId, email: adminEmail });
+    } catch (e: any) {
+      console.error("admin/login error:", e);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/logout", (req, res) => {
+    delete req.session.adminEmail;
+    delete req.session.adminFranchiseId;
+    res.json({ success: true });
+  });
+
+  app.get("/api/admin/me", requireAdminAuth, async (req, res) => {
+    res.json({
+      email: req.session.adminEmail!,
+      franchiseId: req.session.adminFranchiseId!,
+    });
+  });
+
+  /* ============================ Admin Flags API ============================ */
+
+  app.get("/api/admin/flags", requireAdminAuth, async (req, res) => {
+    try {
+      const fid = String(req.session.adminFranchiseId!);
+      const all = await readFlags();
+      const rec = all[fid] || normalizeFlags({});
+      res.json({
+        franchiseId: fid,
+        hideBilling: rec.hideBilling,
+        hideHours: rec.hideHours,
+        billingColumnVisibility: rec.billingColumnVisibility,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Failed to read flags" });
+    }
+  });
+
+  // Accepts any subset of { hideBilling, hideHours, billingColumnVisibility }
+  app.post("/api/admin/flags", requireAdminAuth, async (req, res) => {
+    try {
+      const fid = String(req.session.adminFranchiseId!);
+      const patch: Partial<Flags> = {};
+
+      // direct booleans
+      if (typeof req.body?.hideBilling === "boolean") patch.hideBilling = !!req.body.hideBilling;
+      if (typeof req.body?.hideHours === "boolean")   patch.hideHours   = !!req.body.hideHours;
+
+      // nested object (full or partial)
+      if (req.body?.billingColumnVisibility && typeof req.body.billingColumnVisibility === "object") {
+        const bc = req.body.billingColumnVisibility as BillingColumnVisibility;
+        const nextCols: BillingColumnVisibility = {};
+        if (typeof bc.hideDate === "boolean") nextCols.hideDate = bc.hideDate;
+        if (typeof bc.hideStudent === "boolean") nextCols.hideStudent = bc.hideStudent;
+        if (typeof bc.hideEventType === "boolean") nextCols.hideEventType = bc.hideEventType;
+        if (typeof bc.hideAttendance === "boolean") nextCols.hideAttendance = bc.hideAttendance;
+        if (typeof bc.hideAdjustment === "boolean") nextCols.hideAdjustment = bc.hideAdjustment;
+        patch.billingColumnVisibility = nextCols;
+      }
+
+      // also support { policy: { ... } } (back-compat)
+      if (req.body?.policy && typeof req.body.policy === "object") {
+        const p = req.body.policy;
+        if (typeof p.hideBilling === "boolean") patch.hideBilling = !!p.hideBilling;
+        if (typeof p.hideHours === "boolean")   patch.hideHours   = !!p.hideHours;
+      }
+
+      if (Object.keys(patch).length === 0) {
+        return res.status(400).json({ message: "No valid flags provided" });
+      }
+
+      await writeFlags(fid, patch);
+      const all = await readFlags();
+      const rec = all[fid] || normalizeFlags({});
+      res.json({
+        franchiseId: fid,
+        hideBilling: rec.hideBilling,
+        hideHours: rec.hideHours,
+        billingColumnVisibility: rec.billingColumnVisibility,
+      });
+    } catch (e: any) {
+      console.error("Failed to update flags:", e);
+      res.status(500).json({ message: e?.message || "Failed to update flags" });
+    }
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Return HTTP server                                                  */
+  /* ------------------------------------------------------------------ */
   const httpServer = createServer(app);
   return httpServer;
 }
