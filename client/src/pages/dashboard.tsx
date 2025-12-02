@@ -54,12 +54,21 @@ export default function Dashboard() {
   const [reqTime, setReqTime] = useState("");
   const [reqChange, setReqChange] = useState("");
   const [reqReason, setReqReason] = useState("");
+  const [showCurrentOptions, setShowCurrentOptions] = useState(false);
+  const [showTimeOptions, setShowTimeOptions] = useState(false);
 
   const { data: user } = useQuery({ queryKey: ["/api/auth/me"] });
   const { data: dashboardData } = useQuery({ queryKey: ["/api/dashboard"], enabled: !!user });
 
   const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
   const hideHours = !!dashboardData?.uiPolicy?.hideHours;
+  const todayDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const nowLocalHHMM = useMemo(() => {
+    const n = new Date();
+    const hh = String(n.getHours()).padStart(2, "0");
+    const mm = String(n.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }, []);
 
   const cols: Required<BillingColumnVisibility> = {
     ...DEFAULT_COLS,
@@ -103,6 +112,20 @@ export default function Dashboard() {
   const students: any[] = dashboardData?.students ?? [];
   const sessions: any[] = dashboardData?.sessions ?? [];
   const billing = dashboardData?.billing;
+
+  const setStudentById = (id: number | null) => {
+    setReqStudentId(id);
+    const name = students.find((s: any) => s.id === id)?.name || "";
+    setReqStudent(name);
+    setSelectedStudent(name);
+  };
+
+  const setStudentByName = (name: string) => {
+    setSelectedStudent(name);
+    const id = students.find((s: any) => s.name === name)?.id ?? null;
+    setReqStudentId(id);
+    setReqStudent(name);
+  };
 
   const parseSessionDate = (s: any): Date | null => {
     const iso: string | undefined = s?.ScheduleDateISO;
@@ -156,6 +179,46 @@ export default function Dashboard() {
       })
       .sort((a, b) => sessionSortKey(a) - sessionSortKey(b));
   }, [sessionsForSelected]);
+
+  const currentSessionOptions = useMemo(() => {
+    const source = upcomingAllForSelected.length ? upcomingAllForSelected : sessionsForSelected;
+    return source.map((s: any) => {
+      const d = parseSessionDate(s);
+      return {
+        value: `${s.Day || ""} ${s.Time || ""}`.trim(),
+        label: `${formatMonthDayYear(d)} — ${s.Day || "Day"} ${s.Time || "Time"}`,
+      };
+    });
+  }, [upcomingAllForSelected, sessionsForSelected]);
+
+  const timeOptions = useMemo(() => {
+    const opts = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        const hh = String(h).padStart(2, "0");
+        const mm = String(m).padStart(2, "0");
+        const value = `${hh}:${mm}`;
+        const label = new Date(`1970-01-01T${value}:00`).toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        });
+        opts.push({ value, label });
+      }
+    }
+    return opts;
+  }, []);
+
+  const filteredCurrentSessionOptions = useMemo(() => {
+    if (!reqCurrent) return currentSessionOptions;
+    const term = reqCurrent.toLowerCase();
+    return currentSessionOptions.filter((o) => o.label.toLowerCase().includes(term) || o.value.toLowerCase().includes(term));
+  }, [currentSessionOptions, reqCurrent]);
+
+  const filteredTimeOptions = useMemo(() => {
+    if (!reqTime) return timeOptions;
+    const term = reqTime.toLowerCase();
+    return timeOptions.filter((o) => o.label.toLowerCase().includes(term) || o.value.includes(term));
+  }, [reqTime, timeOptions]);
 
   // ================== BILLING rows: 30 most current sessions (except today) ==================
   const billingRows: any[] = billing?.account_details ?? [];
@@ -303,6 +366,18 @@ export default function Dashboard() {
     if (reqStudentId == null) {
       alert("Please select a student.");
       return;
+    }
+    if (reqDate && reqTime) {
+      const selectedDateTime = new Date(`${reqDate}T${reqTime}`);
+      if (isNaN(selectedDateTime.getTime())) {
+        alert("Please enter a valid date and time.");
+        return;
+      }
+      const now = new Date();
+      if (selectedDateTime.getTime() < now.getTime()) {
+        alert("Please choose a new schedule start date/time that is in the future.");
+        return;
+      }
     }
     const to = await resolveCenterEmail();
     const isMobile = /android|iphone|ipad|ipod|windows phone/i.test(navigator.userAgent);
@@ -472,9 +547,7 @@ export default function Dashboard() {
                         value={reqStudentId ?? ""}
                         onChange={(e) => {
                           const id = e.target.value ? Number(e.target.value) : null;
-                          setReqStudentId(id);
-                          const name = students.find((s: any) => s.id === id)?.name || "";
-                          setReqStudent(name);
+                          setStudentById(id);
                         }}
                       >
                         <option value="">Select a student…</option>
@@ -492,7 +565,7 @@ export default function Dashboard() {
                     <label htmlFor="current_session" className="form-label">
                       Current Session <span className="text-danger">*</span>
                     </label>
-                    <div className="input-group">
+                    <div className="input-group position-relative" style={{ zIndex: 10 }}>
                       <span className="input-group-text">
                         <i className="fas fa-clock" aria-hidden="true"></i>
                       </span>
@@ -506,9 +579,57 @@ export default function Dashboard() {
                         required
                         value={reqCurrent}
                         onChange={(e) => setReqCurrent(e.target.value)}
+                        onFocus={() => setShowCurrentOptions(true)}
+                        onBlur={() => setTimeout(() => setShowCurrentOptions(false), 120)}
+                        style={{
+                          background: "white",
+                          color: "#2c3e50",
+                          borderColor: "#ced4da",
+                          colorScheme: "light",
+                        }}
                       />
+                      {showCurrentOptions && filteredCurrentSessionOptions.length > 0 && (
+                        <div
+                          className="shadow-sm"
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "40px",
+                            right: 0,
+                            background: "white",
+                            border: "1px solid #ced4da",
+                            borderTop: "none",
+                            borderRadius: "0 0 6px 6px",
+                            maxHeight: "220px",
+                            overflowY: "auto",
+                          }}
+                        >
+                          {filteredCurrentSessionOptions.map((o, i) => (
+                            <button
+                              type="button"
+                              key={`${o.value}-${i}`}
+                              className="w-100 text-start px-3 py-2"
+                              style={{
+                                background: "white",
+                                border: "none",
+                                borderBottom: "1px solid #f1f1f1",
+                                color: "#2c3e50",
+                                fontSize: "14px",
+                              }}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setReqCurrent(o.value);
+                                setShowCurrentOptions(false);
+                              }}
+                            >
+                              <div className="fw-semibold">{o.value || o.label}</div>
+                              <div className="text-muted small">{o.label}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="form-text">Tell us the student’s current day/time.</div>
+                    <div className="form-text">Tell us the student's current day/time.</div>
                   </div>
                 </div>
 
@@ -532,6 +653,7 @@ export default function Dashboard() {
                         autoComplete="off"
                         required
                         value={reqDate}
+                        min={todayDateStr}
                         onChange={(e) => setReqDate(e.target.value)}
                       />
                     </div>
@@ -541,7 +663,7 @@ export default function Dashboard() {
                     <label htmlFor="preferred_time" className="form-label">
                       New Schedule Start Time <span className="text-danger">*</span>
                     </label>
-                    <div className="input-group">
+                    <div className="input-group position-relative" style={{ zIndex: 9 }}>
                       <span className="input-group-text">
                         <i className="fas fa-hourglass-start" aria-hidden="true"></i>
                       </span>
@@ -553,8 +675,68 @@ export default function Dashboard() {
                         autoComplete="off"
                         required
                         value={reqTime}
+                        min={reqDate === todayDateStr ? nowLocalHHMM : undefined}
                         onChange={(e) => setReqTime(e.target.value)}
+                        onFocus={() => setShowTimeOptions(true)}
+                        onClick={() => setShowTimeOptions(true)}
+                        onBlur={() => setTimeout(() => setShowTimeOptions(false), 120)}
+                        style={{
+                          background: "white",
+                          color: "#2c3e50",
+                          borderColor: "#ced4da",
+                          colorScheme: "light",
+                        }}
                       />
+                      <button
+                        type="button"
+                        className="input-group-text"
+                        style={{ cursor: "pointer" }}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setShowTimeOptions((v) => !v)}
+                        aria-label="Open time picker"
+                      >
+                        <i className="fas fa-clock"></i>
+                      </button>
+                      {showTimeOptions && filteredTimeOptions.length > 0 && (
+                        <div
+                          className="shadow-sm"
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "40px",
+                            right: 0,
+                            background: "white",
+                            border: "1px solid #ced4da",
+                            borderTop: "none",
+                            borderRadius: "0 0 6px 6px",
+                            maxHeight: "240px",
+                            overflowY: "auto",
+                          }}
+                        >
+                          {filteredTimeOptions.map((o, i) => (
+                            <button
+                              type="button"
+                              key={`${o.value}-${i}`}
+                              className="w-100 text-start px-3 py-2"
+                              style={{
+                                background: "white",
+                                border: "none",
+                                borderBottom: "1px solid #f1f1f1",
+                                color: "#2c3e50",
+                                fontSize: "14px",
+                              }}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setReqTime(o.value);
+                                setShowTimeOptions(false);
+                              }}
+                            >
+                              <div className="fw-semibold">{o.label}</div>
+                              <div className="text-muted small">{o.value}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -957,7 +1139,7 @@ export default function Dashboard() {
                   <select
                     className="form-control"
                     value={selectedStudent}
-                    onChange={(e) => setSelectedStudent(e.target.value)}
+                    onChange={(e) => setStudentByName(e.target.value)}
                     style={{
                       fontSize: "16px",
                       fontWeight: 600,
