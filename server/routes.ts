@@ -12,7 +12,7 @@ import {
   getHoursBalance,
   getSessions,
   submitScheduleChangeRequest,
-  getStudentReviews,              
+  getStudentReviews,
 } from "./sqlServerStorage";
 import { getPool, sql } from "./db";
 
@@ -24,8 +24,10 @@ const __dirname = path.dirname(__filename);
 const isDist = path.basename(__dirname) === "dist";
 const SERVER_DIR = isDist ? path.join(__dirname, "..") : __dirname;
 
+// Data directory shared for flags + bug reports
 const FLAGS_DIR = path.join(SERVER_DIR, "data");
 const FLAGS_FILE = path.join(FLAGS_DIR, "feature-flags.json");
+const BUGS_FILE = path.join(FLAGS_DIR, "bug_reports.json");
 
 /* ------------------------------------------------------------------ */
 /* Session typing                                                     */
@@ -194,23 +196,6 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
   return null;
 }
 
-/* --------------------- Small date helpers for reviews --------------------- */
-function yyyymmdd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-
-function startOfWeekMonday(today = new Date()): Date {
-  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dow = d.getDay(); // 0=Sun..6=Sat
-  const delta = (dow + 6) % 7; // days since Monday
-  d.setDate(d.getDate() - delta);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
 /* ------------------------------------------------------------------ */
 /* Route registration                                                  */
 /* ------------------------------------------------------------------ */
@@ -343,7 +328,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
 
         hideBillingForParent = franchiseIds.some((fid) => !!flags[fid]?.hideBilling);
-        hideHoursForParent   = franchiseIds.some((fid) => !!flags[fid]?.hideHours);
+        hideHoursForParent = franchiseIds.some((fid) => !!flags[fid]?.hideHours);
 
         for (const fid of franchiseIds) {
           const rec = flags[fid];
@@ -467,41 +452,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  /* ====================== Reviews (Today + This Week) ====================== */
-
-  app.get("/api/students/:studentId/reviews/week", requireParentAuth, async (req, res) => {
-    try {
-      const sid = Number(req.params.studentId);
-      if (!Number.isFinite(sid)) return res.status(400).json({ message: "Invalid studentId" });
-
-      // authorization guard: only students linked to this parent
-      const studentIds = (req.session.studentIds || []).map(Number);
-      if (!studentIds.includes(sid)) {
-        return res.status(403).json({ message: "Unauthorized access to student" });
-      }
-
-      // Monday -> tomorrow (include "today")
-      const today = new Date();
-      const monday = startOfWeekMonday(today);
-      const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-
-      const fromDate = yyyymmdd(monday);
-      const toDate   = yyyymmdd(tomorrow);
-
-      const { rows, total } = await getStudentReviews(sid, {
-        fromDate,
-        toDate,
-        offset: 0,
-        limit: 50,
-      });
-
-      res.json({ rows, total, fromDate, toDate });
-    } catch (e: any) {
-      console.error("[/api/students/:id/reviews/week] error:", e);
-      res.status(500).json({ message: "Failed to load reviews" });
-    }
-  });
-
   /* ============================ Schedule change (keep stub) ============================ */
 
   app.post("/api/schedule-change-request", requireParentAuth, async (req, res) => {
@@ -547,9 +497,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /* ============================ Weekly Student Reviews ============================ */
+  // GET /api/students/:studentId/reviews/week
+  app.get("/api/students/:studentId/reviews/week", requireParentAuth, async (req, res) => {
+    try {
+      const sid = Number(req.params.studentId);
+      if (!Number.isFinite(sid)) {
+        return res.status(400).json({ message: "Invalid studentId" });
+      }
+
+      const allowedIds = (req.session.studentIds || []).map(Number);
+      if (!allowedIds.includes(sid)) {
+        return res.status(403).json({ message: "Unauthorized access to student" });
+      }
+
+      const today = new Date();
+      const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+      // Monday-of-this-week (assuming Monday as first day of week)
+      const weekday = todayDateOnly.getDay(); // 0=Sun,1=Mon,...
+      const diffToMonday = (weekday + 6) % 7; // days since Monday
+      const monday = new Date(todayDateOnly);
+      monday.setDate(todayDateOnly.getDate() - diffToMonday);
+
+      const fromDate = monday.toISOString().slice(0, 10); // yyyy-mm-dd
+      const tomorrow = new Date(todayDateOnly);
+      tomorrow.setDate(todayDateOnly.getDate() + 1);
+      const toDate = tomorrow.toISOString().slice(0, 10);
+
+      const { rows, total } = await getStudentReviews(sid, {
+        fromDate,
+        toDate,
+        offset: 0,
+        limit: 50,
+      });
+
+      res.json({ rows, total, fromDate, toDate });
+    } catch (e: any) {
+      console.error("reviews/week error:", e);
+      res.status(500).json({ message: "Failed to load reviews" });
+    }
+  });
+
+  /* ============================ Bug Reports ============================ */
+  // POST /api/bugs/report
+  app.post("/api/bugs/report", requireParentAuth, async (req, res) => {
+    try {
+      const { message, page } = req.body || {};
+      const userEmail = req.session.email || null;
+      const inquiryId = req.session.inquiryId || null;
+
+      if (!message || typeof message !== "string") {
+        return res.status(400).json({ message: "Bug message is required." });
+      }
+
+      await fs.mkdir(path.dirname(BUGS_FILE), { recursive: true });
+
+      let existing: any[] = [];
+      try {
+        const raw = await fs.readFile(BUGS_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) existing = parsed;
+      } catch (err: any) {
+        if (err.code !== "ENOENT") {
+          console.warn("bug_reports.json read/parse error:", err.message);
+        }
+        existing = [];
+      }
+
+      const newReport = {
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        message,
+        page: page || null,
+        user: {
+          email: userEmail,
+          inquiryId,
+        },
+        userAgent: req.get("user-agent") || null,
+        ip: (req.headers["x-forwarded-for"] as string) || req.ip || null,
+      };
+
+      existing.push(newReport);
+
+      await fs.writeFile(BUGS_FILE, JSON.stringify(existing, null, 2), "utf8");
+
+      console.log("✅ Bug report written to:", BUGS_FILE);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("❌ Error writing bug report:", err);
+      res.status(500).json({ message: "Failed to save bug report.", error: err?.message });
+    }
+  });
+
   /* ============================ Admin Auth ============================ */
 
-  // Admin login
+  // Admin login (email + password from dbo.tblUsers; map to franchise via dpinkney_TC.dbo.tblFranchies.FranchiesEmail)
   app.post("/api/admin/login", async (req, res) => {
     try {
       const { email, password } = req.body || {};
@@ -634,7 +678,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // direct booleans
       if (typeof req.body?.hideBilling === "boolean") patch.hideBilling = !!req.body.hideBilling;
-      if (typeof req.body?.hideHours === "boolean")   patch.hideHours   = !!req.body.hideHours;
+      if (typeof req.body?.hideHours === "boolean") patch.hideHours = !!req.body.hideHours;
 
       // nested object (full or partial)
       if (req.body?.billingColumnVisibility && typeof req.body.billingColumnVisibility === "object") {
@@ -652,7 +696,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.body?.policy && typeof req.body.policy === "object") {
         const p = req.body.policy;
         if (typeof p.hideBilling === "boolean") patch.hideBilling = !!p.hideBilling;
-        if (typeof p.hideHours === "boolean")   patch.hideHours   = !!p.hideHours;
+        if (typeof p.hideHours === "boolean") patch.hideHours = !!p.hideHours;
       }
 
       if (Object.keys(patch).length === 0) {
