@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
-import billingIconPath from "@assets/tcBillingIcon_1755332058201.png";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
 
 type Tab = "home" | "schedule" | "billing";
@@ -42,6 +41,22 @@ async function getJSON<T>(url: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+type ReviewRow = {
+  SessionID: number;
+  SessionDateISO: string;
+  CoveredMaterialsScore: number | null;
+  CoveredMaterialsText: string | null;
+  StudentAttitudeText: string | null;
+  OtherFeedback: string | null;
+};
+
+type WeeklyReviewsResp = {
+  rows: ReviewRow[];
+  total: number;
+  fromDate: string;
+  toDate: string;
+};
+
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -57,12 +72,26 @@ export default function Dashboard() {
   const [showCurrentOptions, setShowCurrentOptions] = useState(false);
   const [showTimeOptions, setShowTimeOptions] = useState(false);
 
+  // --- Bug report state ---
+  const [bugOpen, setBugOpen] = useState(false);
+  const [bugText, setBugText] = useState("");
+  const [bugSubmitting, setBugSubmitting] = useState(false);
+  const [bugStatus, setBugStatus] = useState<null | "success" | "error">(null);
+  const [bugErrorMsg, setBugErrorMsg] = useState<string | null>(null);
+
   const { data: user } = useQuery({ queryKey: ["/api/auth/me"] });
-  const { data: dashboardData } = useQuery({ queryKey: ["/api/dashboard"], enabled: !!user });
+  const { data: dashboardData } = useQuery({
+    queryKey: ["/api/dashboard"],
+    enabled: !!user,
+  });
 
   const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
   const hideHours = !!dashboardData?.uiPolicy?.hideHours;
-  const todayDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  const todayDateStr = useMemo(
+    () => new Date().toISOString().slice(0, 10),
+    []
+  );
   const nowLocalHHMM = useMemo(() => {
     const n = new Date();
     const hh = String(n.getHours()).padStart(2, "0");
@@ -93,10 +122,16 @@ export default function Dashboard() {
       return isNaN(d2.getTime()) ? null : d2;
     }
     if (isoOrAny instanceof Date) {
-      return new Date(isoOrAny.getFullYear(), isoOrAny.getMonth(), isoOrAny.getDate());
+      return new Date(
+        isoOrAny.getFullYear(),
+        isoOrAny.getMonth(),
+        isoOrAny.getDate()
+      );
     }
     const d3 = new Date(String(isoOrAny));
-    return isNaN(d3.getTime()) ? null : new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
+    return isNaN(d3.getTime())
+      ? null
+      : new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
   };
 
   const sameDay = (a: Date, b: Date) =>
@@ -106,7 +141,11 @@ export default function Dashboard() {
 
   const formatMonthDayYear = (d: Date | null) =>
     d && !isNaN(d.getTime())
-      ? d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+      ? d.toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
       : "N/A";
 
   const students: any[] = dashboardData?.students ?? [];
@@ -147,7 +186,9 @@ export default function Dashboard() {
   const recentSessions = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(
+      today.getTime() - 30 * 24 * 60 * 60 * 1000
+    );
     return sessionsForSelected
       .filter((s) => {
         const d = parseSessionDate(s);
@@ -181,12 +222,16 @@ export default function Dashboard() {
   }, [sessionsForSelected]);
 
   const currentSessionOptions = useMemo(() => {
-    const source = upcomingAllForSelected.length ? upcomingAllForSelected : sessionsForSelected;
+    const source = upcomingAllForSelected.length
+      ? upcomingAllForSelected
+      : sessionsForSelected;
     return source.map((s: any) => {
       const d = parseSessionDate(s);
       return {
         value: `${s.Day || ""} ${s.Time || ""}`.trim(),
-        label: `${formatMonthDayYear(d)} — ${s.Day || "Day"} ${s.Time || "Time"}`,
+        label: `${formatMonthDayYear(d)} — ${s.Day || "Day"} ${
+          s.Time || "Time"
+        }`,
       };
     });
   }, [upcomingAllForSelected, sessionsForSelected]);
@@ -198,10 +243,13 @@ export default function Dashboard() {
         const hh = String(h).padStart(2, "0");
         const mm = String(m).padStart(2, "0");
         const value = `${hh}:${mm}`;
-        const label = new Date(`1970-01-01T${value}:00`).toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        });
+        const label = new Date(`1970-01-01T${value}:00`).toLocaleTimeString(
+          "en-US",
+          {
+            hour: "numeric",
+            minute: "2-digit",
+          }
+        );
         opts.push({ value, label });
       }
     }
@@ -211,13 +259,19 @@ export default function Dashboard() {
   const filteredCurrentSessionOptions = useMemo(() => {
     if (!reqCurrent) return currentSessionOptions;
     const term = reqCurrent.toLowerCase();
-    return currentSessionOptions.filter((o) => o.label.toLowerCase().includes(term) || o.value.toLowerCase().includes(term));
+    return currentSessionOptions.filter(
+      (o) =>
+        o.label.toLowerCase().includes(term) ||
+        o.value.toLowerCase().includes(term)
+    );
   }, [currentSessionOptions, reqCurrent]);
 
   const filteredTimeOptions = useMemo(() => {
     if (!reqTime) return timeOptions;
     const term = reqTime.toLowerCase();
-    return timeOptions.filter((o) => o.label.toLowerCase().includes(term) || o.value.includes(term));
+    return timeOptions.filter(
+      (o) => o.label.toLowerCase().includes(term) || o.value.includes(term)
+    );
   }, [reqTime, timeOptions]);
 
   // ================== BILLING rows: 30 most current sessions (except today) ==================
@@ -241,7 +295,11 @@ export default function Dashboard() {
 
   const current30SessionRows = useMemo(() => {
     const today = new Date();
-    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const todayDateOnly = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
 
     return (billingRows || [])
       .filter(isSessionRow)
@@ -261,16 +319,6 @@ export default function Dashboard() {
   }, [billingRows]);
 
   // ------------------- Reviews fetch (Today + This Week) -------------------
-  type ReviewRow = {
-    SessionID: number;
-    SessionDateISO: string;
-    CoveredMaterialsScore: number | null;
-    CoveredMaterialsText: string | null;
-    StudentAttitudeText: string | null;
-    OtherFeedback: string | null;
-  };
-  type WeeklyReviewsResp = { rows: ReviewRow[]; total: number; fromDate: string; toDate: string };
-
   const selectedStudentId: number | null = useMemo(() => {
     if (!selectedStudent) return null;
     const s = students.find((x: any) => x.name === selectedStudent);
@@ -285,7 +333,9 @@ export default function Dashboard() {
     queryKey: ["/api/students", selectedStudentId, "reviews", "week"],
     enabled: selectedStudentId != null,
     queryFn: () =>
-      getJSON<WeeklyReviewsResp>(`/api/students/${selectedStudentId}/reviews/week`),
+      getJSON<WeeklyReviewsResp>(
+        `/api/students/${selectedStudentId}/reviews/week`
+      ),
   });
 
   const handleLogout = async () => {
@@ -298,10 +348,16 @@ export default function Dashboard() {
   };
 
   function buildEmailParts() {
-    const subject = `Schedule Change Request — ${reqStudent || "Student"}`.replace(/\s+/g, " ").trim();
+    const subject = `Schedule Change Request — ${
+      reqStudent || "Student"
+    }`.replace(/\s+/g, " ").trim();
 
     const prettyDate = reqDate
-      ? new Date(reqDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+      ? new Date(reqDate).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
       : "(not provided)";
     const prettyTime = reqTime || "(not provided)";
 
@@ -344,13 +400,19 @@ export default function Dashboard() {
 
   function openGmailCompose(to: string) {
     const { subjectEnc, bodyEnc } = buildEmailParts();
-    const gmail = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${subjectEnc}&body=${bodyEnc}`;
+    const gmail = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+      to
+    )}&su=${subjectEnc}&body=${bodyEnc}`;
     const w = window.open(gmail, "_blank", "noopener,noreferrer");
     if (!w) {
-      const outlook = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}&subject=${subjectEnc}&body=${bodyEnc}`;
+      const outlook = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(
+        to
+      )}&subject=${subjectEnc}&body=${bodyEnc}`;
       const w2 = window.open(outlook, "_blank", "noopener,noreferrer");
       if (!w2) {
-        const mailto = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
+        const mailto = `mailto:${encodeURIComponent(
+          to
+        )}?subject=${subjectEnc}&body=${bodyEnc}`;
         window.location.href = mailto;
       }
     }
@@ -358,7 +420,9 @@ export default function Dashboard() {
 
   function openMailto(to: string) {
     const { subjectEnc, bodyEnc } = buildEmailParts();
-    const mailto = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
+    const mailto = `mailto:${encodeURIComponent(
+      to
+    )}?subject=${subjectEnc}&body=${bodyEnc}`;
     window.location.href = mailto;
   }
 
@@ -375,36 +439,66 @@ export default function Dashboard() {
       }
       const now = new Date();
       if (selectedDateTime.getTime() < now.getTime()) {
-        alert("Please choose a new schedule start date/time that is in the future.");
+        alert(
+          "Please choose a new schedule start date/time that is in the future."
+        );
         return;
       }
     }
     const to = await resolveCenterEmail();
-    const isMobile = /android|iphone|ipad|ipod|windows phone/i.test(navigator.userAgent);
+    const isMobile = /android|iphone|ipad|ipod|windows phone/i.test(
+      navigator.userAgent
+    );
     if (isMobile) openMailto(to);
     else openGmailCompose(to);
   }
 
-  /* -------- Quick Actions inline (under Logout) -------- */
-  function QuickActionsInline() {
-    return (
-      <div className="mt-2 d-flex gap-2 flex-wrap justify-content-end">
-        <button className="btn btn-sm btn-primary" onClick={() => setActiveTab("schedule")}>
-          <i className="fas fa-calendar-edit me-2"></i>
-          Request Schedule Change
-        </button>
-        {!hideBilling && (
-          <button className="btn btn-sm btn-outline-primary" onClick={() => setActiveTab("billing")}>
-            <img
-              src={billingIconPath}
-              alt="Billing Icon"
-              style={{ width: "14px", height: "14px", marginRight: "6px" }}
-            />
-            View Billing Details
-          </button>
-        )}
-      </div>
-    );
+  // -------- Bug report submit --------
+  async function submitBugReport() {
+    if (!bugText.trim()) {
+      alert("Please describe the bug before submitting.");
+      return;
+    }
+    try {
+      setBugSubmitting(true);
+      setBugStatus(null);
+      setBugErrorMsg(null);
+
+      const payload = {
+        message: bugText.trim(),
+        page: "dashboard-home",
+        user: {
+          name: (user as any)?.parent?.name ?? null,
+          email: (user as any)?.parent?.email ?? null,
+          students: students.map((s: any) => s.name),
+        },
+      };
+
+      const res = await fetch("/api/bugs/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Bug report failed (${res.status})`);
+      }
+
+      setBugStatus("success");
+      setBugText("");
+      setTimeout(() => {
+        setBugOpen(false);
+        setBugStatus(null);
+      }, 1200);
+    } catch (err: any) {
+      console.error("Bug report error:", err);
+      setBugStatus("error");
+      setBugErrorMsg(err?.message || "Failed to submit bug report.");
+    } finally {
+      setBugSubmitting(false);
+    }
   }
 
   if (!user || !dashboardData) {
@@ -429,7 +523,11 @@ export default function Dashboard() {
           <div className="container">
             <div className="d-flex justify-content-between align-items-center">
               <div className="header-brand">
-                <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
+                <img
+                  src={logoPath}
+                  alt="Tutoring Club Logo"
+                  className="header-logo"
+                />
                 <h1 className="header-title">Tutoring Club Parent Portal</h1>
               </div>
               <div className="text-end">
@@ -439,10 +537,12 @@ export default function Dashboard() {
                 <div className="text-muted small mb-2">
                   Students: {students.map((s: any) => s.name).join(", ")}
                 </div>
-                <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
+                <button
+                  onClick={handleLogout}
+                  className="btn btn-outline-primary btn-sm"
+                >
                   Logout
                 </button>
-                <QuickActionsInline />
               </div>
             </div>
           </div>
@@ -452,18 +552,36 @@ export default function Dashboard() {
           {/* Tabs */}
           <ul className="nav nav-tabs" role="tablist">
             <li className="nav-item" role="presentation">
-              <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("home"); }}>
+              <a
+                className="nav-link"
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveTab("home");
+                }}
+              >
                 Home
               </a>
             </li>
             <li className="nav-item" role="presentation">
-              <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
+              <a
+                className="nav-link active"
+                href="#"
+                onClick={(e) => e.preventDefault()}
+              >
                 Schedule Updates
               </a>
             </li>
             {!hideBilling && (
               <li className="nav-item" role="presentation">
-                <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("billing"); }}>
+                <a
+                  className="nav-link"
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setActiveTab("billing");
+                  }}
+                >
                   Billing Information
                 </a>
               </li>
@@ -477,7 +595,8 @@ export default function Dashboard() {
             <div className="card mb-4">
               <div className="card-header">
                 <h5 style={{ color: "white", margin: 0 }}>
-                  Upcoming Schedule for {selectedStudent} ({upcomingAllForSelected.length})
+                  Upcoming Schedule for {selectedStudent} (
+                  {upcomingAllForSelected.length})
                 </h5>
               </div>
               <div className="card-body">
@@ -492,26 +611,32 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {upcomingAllForSelected.map((session: any, index: number) => {
-                        const d = parseSessionDate(session);
-                        return (
-                          <tr key={index}>
-                            <td>{session.Day || "N/A"}</td>
-                            <td>{session.Time || "N/A"}</td>
-                            <td>{formatMonthDayYear(d)}</td>
-                            <td>Active</td>
-                          </tr>
-                        );
-                      })}
+                      {upcomingAllForSelected.map(
+                        (session: any, index: number) => {
+                          const d = parseSessionDate(session);
+                          return (
+                            <tr key={index}>
+                              <td>{session.Day || "N/A"}</td>
+                              <td>{session.Time || "N/A"}</td>
+                              <td>{formatMonthDayYear(d)}</td>
+                              <td>Active</td>
+                            </tr>
+                          );
+                        }
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
             </div>
           ) : selectedStudent ? (
-            <div className="alert alert-info">No upcoming sessions for {selectedStudent}.</div>
+            <div className="alert alert-info">
+              No upcoming sessions for {selectedStudent}.
+            </div>
           ) : (
-            <div className="alert alert-info">Please select a student to view upcoming schedule.</div>
+            <div className="alert alert-info">
+              Please select a student to view upcoming schedule.
+            </div>
           )}
 
           {/* ======= Schedule Change Request Form (refined) ======= */}
@@ -523,8 +648,9 @@ export default function Dashboard() {
 
             <div className="card-body">
               <p className="text-muted mb-4">
-                Use this form to request a new start date/time or describe a change to your student’s
-                current session. We’ll email your center with the details.
+                Use this form to request a new start date/time or describe a
+                change to your student’s current session. We’ll email your
+                center with the details.
               </p>
 
               <form onSubmit={(e) => e.preventDefault()} noValidate>
@@ -536,7 +662,10 @@ export default function Dashboard() {
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
-                        <i className="fas fa-user-graduate" aria-hidden="true"></i>
+                        <i
+                          className="fas fa-user-graduate"
+                          aria-hidden="true"
+                        ></i>
                       </span>
                       <select
                         className="form-control"
@@ -546,7 +675,9 @@ export default function Dashboard() {
                         required
                         value={reqStudentId ?? ""}
                         onChange={(e) => {
-                          const id = e.target.value ? Number(e.target.value) : null;
+                          const id = e.target.value
+                            ? Number(e.target.value)
+                            : null;
                           setStudentById(id);
                         }}
                       >
@@ -558,14 +689,19 @@ export default function Dashboard() {
                         ))}
                       </select>
                     </div>
-                    <div className="form-text">Choose the student this change applies to.</div>
+                    <div className="form-text">
+                      Choose the student this change applies to.
+                    </div>
                   </div>
 
                   <div className="col-md-6">
                     <label htmlFor="current_session" className="form-label">
                       Current Session <span className="text-danger">*</span>
                     </label>
-                    <div className="input-group position-relative" style={{ zIndex: 10 }}>
+                    <div
+                      className="input-group position-relative"
+                      style={{ zIndex: 10 }}
+                    >
                       <span className="input-group-text">
                         <i className="fas fa-clock" aria-hidden="true"></i>
                       </span>
@@ -580,7 +716,12 @@ export default function Dashboard() {
                         value={reqCurrent}
                         onChange={(e) => setReqCurrent(e.target.value)}
                         onFocus={() => setShowCurrentOptions(true)}
-                        onBlur={() => setTimeout(() => setShowCurrentOptions(false), 120)}
+                        onBlur={() =>
+                          setTimeout(
+                            () => setShowCurrentOptions(false),
+                            120
+                          )
+                        }
                         style={{
                           background: "white",
                           color: "#2c3e50",
@@ -588,48 +729,55 @@ export default function Dashboard() {
                           colorScheme: "light",
                         }}
                       />
-                      {showCurrentOptions && filteredCurrentSessionOptions.length > 0 && (
-                        <div
-                          className="shadow-sm"
-                          style={{
-                            position: "absolute",
-                            top: "100%",
-                            left: "40px",
-                            right: 0,
-                            background: "white",
-                            border: "1px solid #ced4da",
-                            borderTop: "none",
-                            borderRadius: "0 0 6px 6px",
-                            maxHeight: "220px",
-                            overflowY: "auto",
-                          }}
-                        >
-                          {filteredCurrentSessionOptions.map((o, i) => (
-                            <button
-                              type="button"
-                              key={`${o.value}-${i}`}
-                              className="w-100 text-start px-3 py-2"
-                              style={{
-                                background: "white",
-                                border: "none",
-                                borderBottom: "1px solid #f1f1f1",
-                                color: "#2c3e50",
-                                fontSize: "14px",
-                              }}
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => {
-                                setReqCurrent(o.value);
-                                setShowCurrentOptions(false);
-                              }}
-                            >
-                              <div className="fw-semibold">{o.value || o.label}</div>
-                              <div className="text-muted small">{o.label}</div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      {showCurrentOptions &&
+                        filteredCurrentSessionOptions.length > 0 && (
+                          <div
+                            className="shadow-sm"
+                            style={{
+                              position: "absolute",
+                              top: "100%",
+                              left: "40px",
+                              right: 0,
+                              background: "white",
+                              border: "1px solid #ced4da",
+                              borderTop: "none",
+                              borderRadius: "0 0 6px 6px",
+                              maxHeight: "220px",
+                              overflowY: "auto",
+                            }}
+                          >
+                            {filteredCurrentSessionOptions.map((o, i) => (
+                              <button
+                                type="button"
+                                key={`${o.value}-${i}`}
+                                className="w-100 text-start px-3 py-2"
+                                style={{
+                                  background: "white",
+                                  border: "none",
+                                  borderBottom: "1px solid #f1f1f1",
+                                  color: "#2c3e50",
+                                  fontSize: "14px",
+                                }}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  setReqCurrent(o.value);
+                                  setShowCurrentOptions(false);
+                                }}
+                              >
+                                <div className="fw-semibold">
+                                  {o.value || o.label}
+                                </div>
+                                <div className="text-muted small">
+                                  {o.label}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                     </div>
-                    <div className="form-text">Tell us the student's current day/time.</div>
+                    <div className="form-text">
+                      Tell us the student's current day/time.
+                    </div>
                   </div>
                 </div>
 
@@ -639,11 +787,15 @@ export default function Dashboard() {
                 <div className="row g-3">
                   <div className="col-md-6">
                     <label htmlFor="preferred_date" className="form-label">
-                      New Schedule Start Date <span className="text-danger">*</span>
+                      New Schedule Start Date{" "}
+                      <span className="text-danger">*</span>
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
-                        <i className="fas fa-calendar-day" aria-hidden="true"></i>
+                        <i
+                          className="fas fa-calendar-day"
+                          aria-hidden="true"
+                        ></i>
                       </span>
                       <input
                         type="date"
@@ -661,11 +813,18 @@ export default function Dashboard() {
 
                   <div className="col-md-6">
                     <label htmlFor="preferred_time" className="form-label">
-                      New Schedule Start Time <span className="text-danger">*</span>
+                      New Schedule Start Time{" "}
+                      <span className="text-danger">*</span>
                     </label>
-                    <div className="input-group position-relative" style={{ zIndex: 9 }}>
+                    <div
+                      className="input-group position-relative"
+                      style={{ zIndex: 9 }}
+                    >
                       <span className="input-group-text">
-                        <i className="fas fa-hourglass-start" aria-hidden="true"></i>
+                        <i
+                          className="fas fa-hourglass-start"
+                          aria-hidden="true"
+                        ></i>
                       </span>
                       <input
                         type="time"
@@ -675,11 +834,15 @@ export default function Dashboard() {
                         autoComplete="off"
                         required
                         value={reqTime}
-                        min={reqDate === todayDateStr ? nowLocalHHMM : undefined}
+                        min={
+                          reqDate === todayDateStr ? nowLocalHHMM : undefined
+                        }
                         onChange={(e) => setReqTime(e.target.value)}
                         onFocus={() => setShowTimeOptions(true)}
                         onClick={() => setShowTimeOptions(true)}
-                        onBlur={() => setTimeout(() => setShowTimeOptions(false), 120)}
+                        onBlur={() =>
+                          setTimeout(() => setShowTimeOptions(false), 120)
+                        }
                         style={{
                           background: "white",
                           color: "#2c3e50",
@@ -697,46 +860,49 @@ export default function Dashboard() {
                       >
                         <i className="fas fa-clock"></i>
                       </button>
-                      {showTimeOptions && filteredTimeOptions.length > 0 && (
-                        <div
-                          className="shadow-sm"
-                          style={{
-                            position: "absolute",
-                            top: "100%",
-                            left: "40px",
-                            right: 0,
-                            background: "white",
-                            border: "1px solid #ced4da",
-                            borderTop: "none",
-                            borderRadius: "0 0 6px 6px",
-                            maxHeight: "240px",
-                            overflowY: "auto",
-                          }}
-                        >
-                          {filteredTimeOptions.map((o, i) => (
-                            <button
-                              type="button"
-                              key={`${o.value}-${i}`}
-                              className="w-100 text-start px-3 py-2"
-                              style={{
-                                background: "white",
-                                border: "none",
-                                borderBottom: "1px solid #f1f1f1",
-                                color: "#2c3e50",
-                                fontSize: "14px",
-                              }}
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => {
-                                setReqTime(o.value);
-                                setShowTimeOptions(false);
-                              }}
-                            >
-                              <div className="fw-semibold">{o.label}</div>
-                              <div className="text-muted small">{o.value}</div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      {showTimeOptions &&
+                        filteredTimeOptions.length > 0 && (
+                          <div
+                            className="shadow-sm"
+                            style={{
+                              position: "absolute",
+                              top: "100%",
+                              left: "40px",
+                              right: 0,
+                              background: "white",
+                              border: "1px solid #ced4da",
+                              borderTop: "none",
+                              borderRadius: "0 0 6px 6px",
+                              maxHeight: "240px",
+                              overflowY: "auto",
+                            }}
+                          >
+                            {filteredTimeOptions.map((o, i) => (
+                              <button
+                                type="button"
+                                key={`${o.value}-${i}`}
+                                className="w-100 text-start px-3 py-2"
+                                style={{
+                                  background: "white",
+                                  border: "none",
+                                  borderBottom: "1px solid #f1f1f1",
+                                  color: "#2c3e50",
+                                  fontSize: "14px",
+                                }}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  setReqTime(o.value);
+                                  setShowTimeOptions(false);
+                                }}
+                              >
+                                <div className="fw-semibold">{o.label}</div>
+                                <div className="text-muted small">
+                                  {o.value}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -746,8 +912,12 @@ export default function Dashboard() {
                 {/* Row 3: Requested Change + Reason */}
                 <div className="row g-3">
                   <div className="col-md-7">
-                    <label htmlFor="requested_change" className="form-label">
-                      Requested Change <span className="text-danger">*</span>
+                    <label
+                      htmlFor="requested_change"
+                      className="form-label"
+                    >
+                      Requested Change{" "}
+                      <span className="text-danger">*</span>
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
@@ -765,7 +935,9 @@ export default function Dashboard() {
                         onChange={(e) => setReqChange(e.target.value)}
                       />
                     </div>
-                    <div className="form-text">Please include any specific days, times, or constraints.</div>
+                    <div className="form-text">
+                      Please include any specific days, times, or constraints.
+                    </div>
                   </div>
 
                   <div className="col-md-5">
@@ -774,7 +946,10 @@ export default function Dashboard() {
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
-                        <i className="fas fa-comment-dots" aria-hidden="true"></i>
+                        <i
+                          className="fas fa-comment-dots"
+                          aria-hidden="true"
+                        ></i>
                       </span>
                       <textarea
                         className="form-control"
@@ -836,7 +1011,11 @@ export default function Dashboard() {
           <div className="container">
             <div className="d-flex justify-content-between align-items-center">
               <div className="header-brand">
-                <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
+                <img
+                  src={logoPath}
+                  alt="Tutoring Club Logo"
+                  className="header-logo"
+                />
                 <h1 className="header-title">Tutoring Club Parent Portal</h1>
               </div>
               <div className="text-end">
@@ -846,10 +1025,12 @@ export default function Dashboard() {
                 <div className="text-muted small mb-2">
                   Students: {students.map((s: any) => s.name).join(", ")}
                 </div>
-                <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
+                <button
+                  onClick={handleLogout}
+                  className="btn btn-outline-primary btn-sm"
+                >
                   Logout
                 </button>
-                <QuickActionsInline />
               </div>
             </div>
           </div>
@@ -859,18 +1040,36 @@ export default function Dashboard() {
           {/* Tabs */}
           <ul className="nav nav-tabs" role="tablist">
             <li className="nav-item" role="presentation">
-              <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("home"); }}>
+              <a
+                className="nav-link"
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveTab("home");
+                }}
+              >
                 Home
               </a>
             </li>
             <li className="nav-item" role="presentation">
-              <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("schedule"); }}>
+              <a
+                className="nav-link"
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveTab("schedule");
+                }}
+              >
                 Schedule Updates
               </a>
             </li>
             {!hideBilling && (
               <li className="nav-item" role="presentation">
-                <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
+                <a
+                  className="nav-link active"
+                  href="#"
+                  onClick={(e) => e.preventDefault()}
+                >
                   Billing Information
                 </a>
               </li>
@@ -880,18 +1079,23 @@ export default function Dashboard() {
           {/* Summary (hours remaining) */}
           <div className="card mb-4">
             <div className="card-header">
-              <h5 style={{ color: "white", margin: 0 }}>Account Balance Summary</h5>
+              <h5 style={{ color: "white", margin: 0 }}>
+                Account Balance Summary
+              </h5>
             </div>
             <div className="card-body">
               <div className="d-flex justify-content-between">
                 <div>
                   <div className="text-muted small mb-1">Hours Remaining</div>
-                  <div className="h4 mb-0" style={{ color: "var(--tutoring-blue)" }}>
+                  <div
+                    className="h4 mb-0"
+                    style={{ color: "var(--tutoring-blue)" }}
+                  >
                     {hideHours
                       ? "Restricted"
-                      : (typeof billing?.remaining_hours === "number"
+                      : ((typeof billing?.remaining_hours === "number"
                           ? billing.remaining_hours.toFixed(1)
-                          : "0.0") + " hours"}
+                          : "0.0") + " hours")}
                   </div>
                 </div>
                 <div className="text-end">
@@ -908,7 +1112,9 @@ export default function Dashboard() {
           <div className="card mb-4">
             <div className="card-header d-flex justify-content-between align-items-center">
               <h5 style={{ color: "white", margin: 0 }}>Account Details</h5>
-              <small className="text-light">30 most current sessions (excluding today)</small>
+              <small className="text-light">
+                30 most current sessions (excluding today)
+              </small>
             </div>
             <div className="card-body">
               <div className="table-container">
@@ -920,43 +1126,58 @@ export default function Dashboard() {
                       {!cols.hideEventType && <th>Event Type</th>}
                       {!cols.hideAttendance && <th>Attendance</th>}
                       {!cols.hideAdjustment && (
-                        <th className="text-end" style={{ width: 110 }}>Adjustment</th>
+                        <th className="text-end" style={{ width: 110 }}>
+                          Adjustment
+                        </th>
                       )}
                     </tr>
                   </thead>
                   <tbody>
                     {current30SessionRows.length ? (
-                      current30SessionRows.map((detail: any, index: number) => {
-                        const d = getRowDate(detail);
-                        const dateLabel = formatMonthDayYear(d);
+                      current30SessionRows.map(
+                        (detail: any, index: number) => {
+                          const d = getRowDate(detail);
+                          const dateLabel = formatMonthDayYear(d);
 
-                        const adjNum = Number(detail.Adjustment ?? 0);
-                        const adjClass =
-                          Number.isFinite(adjNum) && adjNum !== 0
-                            ? adjNum > 0
-                              ? "text-success"
-                              : "text-danger"
-                            : "";
+                          const adjNum = Number(detail.Adjustment ?? 0);
+                          const adjClass =
+                            Number.isFinite(adjNum) && adjNum !== 0
+                              ? adjNum > 0
+                                ? "text-success"
+                                : "text-danger"
+                              : "";
 
-                        return (
-                          <tr key={index}>
-                            {!cols.hideDate && <td>{dateLabel}</td>}
-                            {!cols.hideStudent && <td>{detail.Student || "N/A"}</td>}
-                            {!cols.hideEventType && <td>{detail.EventType || "N/A"}</td>}
-                            {!cols.hideAttendance && <td>{detail.Attendance || "N/A"}</td>}
-                            {!cols.hideAdjustment && (
-                              <td className={`text-end ${adjClass}`}>
-                                {Number.isFinite(adjNum)
-                                  ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
-                                  : String(detail.Adjustment ?? 0)}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })
+                          return (
+                            <tr key={index}>
+                              {!cols.hideDate && <td>{dateLabel}</td>}
+                              {!cols.hideStudent && (
+                                <td>{detail.Student || "N/A"}</td>
+                              )}
+                              {!cols.hideEventType && (
+                                <td>{detail.EventType || "N/A"}</td>
+                              )}
+                              {!cols.hideAttendance && (
+                                <td>{detail.Attendance || "N/A"}</td>
+                              )}
+                              {!cols.hideAdjustment && (
+                                <td className={`text-end ${adjClass}`}>
+                                  {Number.isFinite(adjNum)
+                                    ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(
+                                        2
+                                      )}`
+                                    : String(detail.Adjustment ?? 0)}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        }
+                      )
                     ) : (
                       <tr>
-                        <td colSpan={5} className="text-center text-muted">
+                        <td
+                          colSpan={5}
+                          className="text-center text-muted"
+                        >
                           No session records available.
                         </td>
                       </tr>
@@ -971,7 +1192,8 @@ export default function Dashboard() {
                   cols.hideAttendance &&
                   cols.hideAdjustment && (
                     <div className="alert alert-info mt-3">
-                      Columns are hidden by your center. If you feel this is a mistake, please contact the center.
+                      Columns are hidden by your center. If you feel this is a
+                      mistake, please contact the center.
                     </div>
                   )}
               </div>
@@ -990,7 +1212,11 @@ export default function Dashboard() {
         <div className="container">
           <div className="d-flex justify-content-between align-items-center">
             <div className="header-brand">
-              <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
+              <img
+                src={logoPath}
+                alt="Tutoring Club Logo"
+                className="header-logo"
+              />
               <h1 className="header-title">Tutoring Club Parent Portal</h1>
             </div>
             <div className="text-end">
@@ -1000,8 +1226,12 @@ export default function Dashboard() {
               <div className="text-muted small mb-2">
                 Students: {students.map((s: any) => s.name).join(", ")}
               </div>
-              <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">Logout</button>
-              <QuickActionsInline />
+              <button
+                onClick={handleLogout}
+                className="btn btn-outline-primary btn-sm"
+              >
+                Logout
+              </button>
             </div>
           </div>
         </div>
@@ -1011,18 +1241,36 @@ export default function Dashboard() {
         {/* Tabs */}
         <ul className="nav nav-tabs" role="tablist">
           <li className="nav-item" role="presentation">
-            <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
+            <a
+              className="nav-link active"
+              href="#"
+              onClick={(e) => e.preventDefault()}
+            >
               Home
             </a>
           </li>
           <li className="nav-item" role="presentation">
-            <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("schedule"); }}>
+            <a
+              className="nav-link"
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                setActiveTab("schedule");
+              }}
+            >
               Schedule Updates
             </a>
           </li>
           {!hideBilling && (
             <li className="nav-item" role="presentation">
-              <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); setActiveTab("billing"); }}>
+              <a
+                className="nav-link"
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveTab("billing");
+                }}
+              >
                 Billing Information
               </a>
             </li>
@@ -1035,67 +1283,94 @@ export default function Dashboard() {
             <div className="card-header">
               <h5 className="m-0">
                 <i className="fas fa-comments me-2" aria-hidden="true"></i>
-                Here is what our tutors are saying about {selectedStudent}
+                Here is what our tutors are saying about{" "}
+                {selectedStudent || "your student"}
               </h5>
             </div>
             <div className="card-body">
               {!selectedStudent ? (
-                <div className="alert alert-info">Select a student to view reviews.</div>
+                <div className="alert alert-info">
+                  Select a student to view reviews.
+                </div>
               ) : reviewsLoading ? (
                 <div className="text-muted">Loading reviews…</div>
               ) : reviewsError ? (
                 <div className="alert alert-danger">
-                  {(reviewsError as any)?.message || "Failed to load reviews"}
+                  {(reviewsError as any)?.message ||
+                    "Failed to load reviews"}
                 </div>
               ) : (weeklyReviews?.rows?.length ?? 0) === 0 ? (
-                <div className="alert alert-secondary">No reviews for today or this week.</div>
+                <div className="alert alert-secondary">
+                  No reviews for today or this week.
+                </div>
               ) : (
                 <div style={{ maxHeight: 420, overflowY: "auto" }}>
                   {(() => {
                     const rows = weeklyReviews!.rows;
-                    const todayISO = new Date().toISOString().slice(0, 10);
+                    const todayISO = new Date()
+                      .toISOString()
+                      .slice(0, 10);
 
-                    const todayRows = rows.filter(r => r.SessionDateISO === todayISO);
-                    const weekRows  = rows.filter(r => r.SessionDateISO !== todayISO);
+                    const todayRows = rows.filter(
+                      (r) => r.SessionDateISO === todayISO
+                    );
+                    const weekRows = rows.filter(
+                      (r) => r.SessionDateISO !== todayISO
+                    );
 
                     const formatDate = (iso: string) => {
                       const d = new Date(iso + "T00:00:00");
                       return d.toLocaleDateString("en-US", {
-                        year: "numeric", month: "long", day: "numeric"
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
                       });
                     };
 
                     const Item = ({ r }: { r: ReviewRow }) => (
-                      <div className="mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
+                      <div
+                        className="mb-3 pb-3"
+                        style={{ borderBottom: "1px solid #eee" }}
+                      >
                         <div className="d-flex justify-content-between align-items-start">
                           <div>
-                            <div className="fw-semibold" style={{ color: "var(--tutoring-blue)" }}>
+                            <div
+                              className="fw-semibold"
+                              style={{ color: "var(--tutoring-blue)" }}
+                            >
                               {formatDate(r.SessionDateISO)}
                             </div>
-      
                           </div>
                           {r.CoveredMaterialsScore != null && (
-                            <span className="badge bg-primary">Materials: {r.CoveredMaterialsScore}</span>
+                            <span className="badge bg-primary">
+                              Materials: {r.CoveredMaterialsScore}
+                            </span>
                           )}
                         </div>
 
                         {r.CoveredMaterialsText && (
                           <div className="mt-2">
-                            <div className="small text-uppercase text-muted">Covered Materials</div>
+                            <div className="small text-uppercase text-muted">
+                              Covered Materials
+                            </div>
                             <div>{r.CoveredMaterialsText}</div>
                           </div>
                         )}
 
                         {r.StudentAttitudeText && (
                           <div className="mt-2">
-                            <div className="small text-uppercase text-muted">Student Attitude</div>
+                            <div className="small text-uppercase text-muted">
+                              Student Attitude
+                            </div>
                             <div>{r.StudentAttitudeText}</div>
                           </div>
                         )}
 
                         {r.OtherFeedback && (
                           <div className="mt-2">
-                            <div className="small text-uppercase text-muted">Other Feedback</div>
+                            <div className="small text-uppercase text-muted">
+                              Other Feedback
+                            </div>
                             <div>{r.OtherFeedback}</div>
                           </div>
                         )}
@@ -1107,16 +1382,26 @@ export default function Dashboard() {
                         {todayRows.length > 0 && (
                           <>
                             <div className="mb-2">
-                              <span className="badge bg-warning text-dark">Today</span>
+                              <span className="badge bg-warning text-dark">
+                                Today
+                              </span>
                             </div>
-                            {todayRows.map((r, i) => <Item key={`t-${i}`} r={r} />)}
+                            {todayRows.map((r, i) => (
+                              <Item key={`t-${i}`} r={r} />
+                            ))}
                           </>
                         )}
 
                         {weekRows.length > 0 && (
                           <>
-                            {todayRows.length > 0 && <div className="mt-2 mb-2 small text-muted">Earlier this week</div>}
-                            {weekRows.map((r, i) => <Item key={`w-${i}`} r={r} />)}
+                            {todayRows.length > 0 && (
+                              <div className="mt-2 mb-2 small text-muted">
+                                Earlier this week
+                              </div>
+                            )}
+                            {weekRows.map((r, i) => (
+                              <Item key={`w-${i}`} r={r} />
+                            ))}
                           </>
                         )}
                       </>
@@ -1135,7 +1420,9 @@ export default function Dashboard() {
             <div className="card">
               <div className="card-body d-flex justify-content-between align-items-start">
                 <div className="flex-grow-1">
-                  <p className="text-muted mb-2 small text-uppercase">Student Information</p>
+                  <p className="text-muted mb-2 small text-uppercase">
+                    Student Information
+                  </p>
                   <select
                     className="form-control"
                     value={selectedStudent}
@@ -1155,36 +1442,60 @@ export default function Dashboard() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-muted small mb-0 mt-1">Choose student to view details</p>
+                  <p className="text-muted small mb-0 mt-1">
+                    Choose student to view details
+                  </p>
                 </div>
                 <div className="text-end">
-                  <i className="fas fa-user" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
+                  <i
+                    className="fas fa-user"
+                    style={{
+                      color: "var(--tutoring-orange)",
+                      fontSize: "24px",
+                    }}
+                  ></i>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Right: Account Balance (Quick Actions now live in header) */}
+          {/* Right: Account Balance */}
           <div className="col-md-6 mb-3">
             {!hideHours && (
               <div
                 className="card"
-                style={{ cursor: "pointer", transition: "transform 0.2s ease" }}
+                style={{
+                  cursor: "pointer",
+                  transition: "transform 0.2s ease",
+                }}
                 onClick={() => setActiveTab("billing")}
               >
                 <div className="card-body d-flex justify-content-between align-items-start">
                   <div>
-                    <p className="text-muted mb-1 small text-uppercase">Account Balance</p>
-                    <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
+                    <p className="text-muted mb-1 small text-uppercase">
+                      Account Balance
+                    </p>
+                    <h4
+                      className="mb-1"
+                      style={{ color: "var(--tutoring-blue)" }}
+                    >
                       {typeof billing?.remaining_hours === "number"
                         ? billing.remaining_hours.toFixed(1)
                         : "0.0"}{" "}
                       hours
                     </h4>
-                    <p className="text-muted small mb-0">Hours remaining</p>
+                    <p className="text-muted small mb-0">
+                      Hours remaining
+                    </p>
                   </div>
                   <div className="text-end">
-                    <i className="fas fa-hourglass" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
+                    <i
+                      className="fas fa-hourglass"
+                      style={{
+                        color: "var(--tutoring-orange)",
+                        fontSize: "24px",
+                      }}
+                    ></i>
                   </div>
                 </div>
               </div>
@@ -1199,37 +1510,77 @@ export default function Dashboard() {
             <div className="card">
               <div className="card-header">
                 <h6>
-                  <img src={scheduleIconPath} alt="Schedule Icon" style={{ width: "20px", height: "20px", marginRight: "8px" }} />
+                  <img
+                    src={scheduleIconPath}
+                    alt="Schedule Icon"
+                    style={{
+                      width: "20px",
+                      height: "20px",
+                      marginRight: "8px",
+                    }}
+                  />
                   Recent Sessions (Last 30 Days)
                 </h6>
               </div>
               <div className="card-body">
                 {selectedStudent && recentSessions.length > 0 ? (
-                  <div className="timeline-container" style={{ maxHeight: "300px", overflowY: "auto" }}>
-                    {recentSessions.map((session: any, index: number) => {
-                      const d = parseSessionDate(session);
-                      return (
-                        <div key={index} className="timeline-item mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
-                          <div className="d-flex">
-                            <div className="timeline-marker me-3 mt-1">
-                              <div style={{ width: "8px", height: "8px", background: "var(--tutoring-orange)", borderRadius: "50%" }}></div>
-                            </div>
-                            <div className="flex-grow-1">
-                              <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                              <p className="mb-1 small">{formatMonthDayYear(d)}</p>
-                              <p className="mb-0 text-muted small">
-                                {(session?.Day || "N/A")} • {(session?.Time || "N/A")}
-                              </p>
+                  <div
+                    className="timeline-container"
+                    style={{ maxHeight: "300px", overflowY: "auto" }}
+                  >
+                    {recentSessions.map(
+                      (session: any, index: number) => {
+                        const d = parseSessionDate(session);
+                        return (
+                          <div
+                            key={index}
+                            className="timeline-item mb-3 pb-3"
+                            style={{
+                              borderBottom: "1px solid #eee",
+                            }}
+                          >
+                            <div className="d-flex">
+                              <div className="timeline-marker me-3 mt-1">
+                                <div
+                                  style={{
+                                    width: "8px",
+                                    height: "8px",
+                                    background: "var(--tutoring-orange)",
+                                    borderRadius: "50%",
+                                  }}
+                                ></div>
+                              </div>
+                              <div className="flex-grow-1">
+                                <h6
+                                  className="mb-1"
+                                  style={{
+                                    color: "var(--tutoring-blue)",
+                                  }}
+                                >
+                                  Session
+                                </h6>
+                                <p className="mb-1 small">
+                                  {formatMonthDayYear(d)}
+                                </p>
+                                <p className="mb-0 text-muted small">
+                                  {(session?.Day || "N/A")} •{" "}
+                                  {(session?.Time || "N/A")}
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      }
+                    )}
                   </div>
                 ) : selectedStudent ? (
-                  <div className="alert alert-info small">No recent sessions found for {selectedStudent}.</div>
+                  <div className="alert alert-info small">
+                    No recent sessions found for {selectedStudent}.
+                  </div>
                 ) : (
-                  <div className="alert alert-info small">Select a student to view recent sessions.</div>
+                  <div className="alert alert-info small">
+                    Select a student to view recent sessions.
+                  </div>
                 )}
               </div>
             </div>
@@ -1240,51 +1591,223 @@ export default function Dashboard() {
             <div className="card">
               <div className="card-header">
                 <h6>
-                  <i className="fas fa-calendar-alt" style={{ marginRight: "8px" }}></i>
+                  <i
+                    className="fas fa-calendar-alt"
+                    style={{ marginRight: "8px" }}
+                  ></i>
                   Upcoming Sessions
                 </h6>
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
                   {selectedStudent && upcomingSessions.length > 0 ? (
-                    upcomingSessions.map((session: any, index: number) => {
-                      const d = parseSessionDate(session);
-                      return (
-                        <div
-                          key={index}
-                          className="session-item mb-3 p-2"
-                          style={{
-                            background: "rgba(74, 122, 166, 0.05)",
-                            borderRadius: "6px",
-                            borderLeft: "3px solid var(--tutoring-orange)",
-                          }}
-                        >
-                          <div className="d-flex justify-content-between align-items-start">
-                            <div>
-                              <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>Session</h6>
-                              <p className="mb-0 small text-muted">{formatMonthDayYear(d)}</p>
-                            </div>
-                            <div className="text-end">
-                              <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
-                                {session?.Day || "N/A"}
-                              </span>
-                              <p className="mb-0 small text-muted">{session?.Time || "N/A"}</p>
+                    upcomingSessions.map(
+                      (session: any, index: number) => {
+                        const d = parseSessionDate(session);
+                        return (
+                          <div
+                            key={index}
+                            className="session-item mb-3 p-2"
+                            style={{
+                              background:
+                                "rgba(74, 122, 166, 0.05)",
+                              borderRadius: "6px",
+                              borderLeft:
+                                "3px solid var(--tutoring-orange)",
+                            }}
+                          >
+                            <div className="d-flex justify-content-between align-items-start">
+                              <div>
+                                <h6
+                                  className="mb-1"
+                                  style={{
+                                    color: "var(--tutoring-blue)",
+                                  }}
+                                >
+                                  Session
+                                </h6>
+                                <p className="mb-0 small text-muted">
+                                  {formatMonthDayYear(d)}
+                                </p>
+                              </div>
+                              <div className="text-end">
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background:
+                                      "var(--tutoring-orange)",
+                                    color: "white",
+                                  }}
+                                >
+                                  {session?.Day || "N/A"}
+                                </span>
+                                <p className="mb-0 small text-muted">
+                                  {session?.Time || "N/A"}
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      }
+                    )
                   ) : selectedStudent ? (
-                    <div className="alert alert-info small">No upcoming sessions found for {selectedStudent}.</div>
+                    <div className="alert alert-info small">
+                      No upcoming sessions found for {selectedStudent}.
+                    </div>
                   ) : (
-                    <div className="alert alert-info small">Select a student to view upcoming sessions.</div>
+                    <div className="alert alert-info small">
+                      Select a student to view upcoming sessions.
+                    </div>
                   )}
                 </div>
               </div>
             </div>
           </div>
-        </div>      
+        </div>
       </div>
+
+      {/* ===== Floating "Report a Bug" bubble (Home only) ===== */}
+      {activeTab === "home" && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setBugOpen(true);
+              setBugStatus(null);
+              setBugErrorMsg(null);
+            }}
+            style={{
+              position: "fixed",
+              bottom: "24px",
+              right: "24px",
+              width: "56px",
+              height: "56px",
+              borderRadius: "50%",
+              border: "none",
+              boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
+              background: "var(--tutoring-orange)",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1050,
+              cursor: "pointer",
+            }}
+            aria-label="Report a bug"
+            title="Report a bug"
+          >
+            <i className="fas fa-bug"></i>
+          </button>
+
+          {bugOpen && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.4)",
+                zIndex: 1051,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "1rem",
+              }}
+            >
+              <div
+                className="card"
+                style={{
+                  maxWidth: "480px",
+                  width: "100%",
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.25)",
+                }}
+              >
+                <div className="card-header d-flex justify-content-between align-items-center">
+                  <h5 className="m-0">
+                    <i className="fas fa-bug me-2" aria-hidden="true"></i>
+                    Report a Bug
+                  </h5>
+                  <button
+                    type="button"
+                    className="btn-close"
+                    aria-label="Close"
+                    onClick={() => {
+                      if (!bugSubmitting) {
+                        setBugOpen(false);
+                        setBugStatus(null);
+                        setBugErrorMsg(null);
+                      }
+                    }}
+                  ></button>
+                </div>
+                <div className="card-body">
+                  <p className="text-muted small">
+                    Found something that doesn&apos;t look right? Let us know
+                    what happened so we can fix it.
+                  </p>
+
+                  <label className="form-label">
+                    Describe the issue <span className="text-danger">*</span>
+                  </label>
+                  <textarea
+                    className="form-control mb-2"
+                    rows={4}
+                    value={bugText}
+                    onChange={(e) => setBugText(e.target.value)}
+                    placeholder="Example: When I click 'Schedule Updates', I get an error message..."
+                    disabled={bugSubmitting}
+                  />
+
+                  {bugStatus === "success" && (
+                    <div className="alert alert-success py-2">
+                      Thank you! Your bug report has been submitted.
+                    </div>
+                  )}
+                  {bugStatus === "error" && (
+                    <div className="alert alert-danger py-2">
+                      {bugErrorMsg || "Something went wrong sending your report."}
+                    </div>
+                  )}
+
+                  <div className="d-flex justify-content-end gap-2 mt-2">
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={() => {
+                        if (!bugSubmitting) {
+                          setBugOpen(false);
+                          setBugStatus(null);
+                          setBugErrorMsg(null);
+                        }
+                      }}
+                      disabled={bugSubmitting}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={submitBugReport}
+                      disabled={bugSubmitting}
+                    >
+                      {bugSubmitting ? (
+                        <>
+                          <span
+                            className="spinner-border spinner-border-sm me-2"
+                            role="status"
+                            aria-hidden="true"
+                          ></span>
+                          Sending…
+                        </>
+                      ) : (
+                        "Submit"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
