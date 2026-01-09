@@ -9,7 +9,7 @@ import {
   getSessions,
   submitScheduleChangeRequest,
   getStudentReviews,
-  getMasterScheduleByStudentId, // ✅ NEW
+  getMasterScheduleByStudentId, 
 } from "./sqlServerStorage";
 
 import { getPool, sql } from "./db"; // MSSQL connection (for tutoring club data)
@@ -580,16 +580,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/bugs/report
   app.post("/api/bugs/report", requireParentAuth, async (req, res) => {
     try {
-      const { message, page } = req.body || {};
-      const userEmail = req.session.email || null;
-      const inquiryId = req.session.inquiryId || null;
+      const { message, pagePath, meta } = req.body || {};
+      const reporterEmail = req.session.email || null;
+      const reporterName = req.session.email || null; // replace w/ real name if you have one
 
       if (!message || typeof message !== "string") {
         return res.status(400).json({ message: "Bug message is required." });
       }
 
       // If you want to also capture franchise_id, grab it from any student in this session
-      // (Optional)
       const contactPhone = req.session.contactPhone!;
       const email = req.session.email!;
       const inquiryData = await findInquiryByEmailAndPhone(email, contactPhone);
@@ -597,22 +596,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const firstFranchise = studentsInfo?.[0]?.FranchiseID;
       const franchiseId = Number.isFinite(Number(firstFranchise)) ? Number(firstFranchise) : null;
 
-      // Adjust column names here to match YOUR bug_reports table schema
+      // Normalize page_path from either:
+      // - pagePath (preferred)
+      // - legacy "page" field (if frontend still sends it)
+      const rawPage = pagePath ?? (req.body?.page as unknown) ?? null;
+      const normalizedPagePath =
+        typeof rawPage === "string" && rawPage.length
+          ? (() => {
+              try {
+                const u = new URL(rawPage, "http://local");
+                return u.pathname || null;
+              } catch {
+                return rawPage.startsWith("/") ? rawPage : null;
+              }
+            })()
+          : null;
+
+      const userAgent = req.get("user-agent") || null;
+
+      // Store useful request debugging info in meta JSON
+      const metaObj =
+        meta && typeof meta === "object"
+          ? meta
+          : {
+              ip: (req.headers["x-forwarded-for"] as string) || req.ip || null,
+            };
+
+      // ✅ Columns match your Neon table:
+      // franchise_id, reporter_name, reporter_email, message, page_path, user_agent, meta, created_at
       await pgQuery(
         `
           INSERT INTO bug_reports
-            (franchise_id, inquiry_id, user_email, page, message, user_agent, ip, created_at)
+            (franchise_id, reporter_name, reporter_email, message, page_path, user_agent, meta)
           VALUES
-            ($1::int, $2::int, $3::text, $4::text, $5::text, $6::text, $7::text, NOW())
+            ($1::int, $2::text, $3::text, $4::text, $5::text, $6::text, $7::jsonb)
         `,
         [
           franchiseId,
-          inquiryId ? Number(inquiryId) : null,
-          userEmail,
-          page || null,
+          reporterName,
+          reporterEmail,
           message,
-          req.get("user-agent") || null,
-          (req.headers["x-forwarded-for"] as string) || req.ip || null,
+          normalizedPagePath,
+          userAgent,
+          JSON.stringify(metaObj),
         ]
       );
 
