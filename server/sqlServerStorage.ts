@@ -66,7 +66,11 @@ async function getTimeLabel(timeId: number): Promise<string | null> {
       const mins = parseInt(m[2], 10);
       const tmp = new Date();
       tmp.setHours(h, mins, 0, 0);
-      label = tmp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }); // "4:30 PM"
+      label = tmp.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }); // "4:30 PM"
     } else {
       // fall back to raw
       label = hhmmss;
@@ -134,6 +138,74 @@ export async function findInquiryByEmailAndPhone(email: string, contactNum: stri
   }
 }
 
+/* ------------------------ Master Schedule (NEW) ------------------------ */
+/**
+ * Returns the student's MASTER schedule (weekly recurring), not dated sessions.
+ * Table: dpinkney_TC.dbo.tblMasterSchedule
+ * Filter: StudentID1 = @sid
+ */
+export async function getMasterScheduleByStudentId(studentId: number | string): Promise<
+  Array<{
+    StudentID: number;
+    Day: string | null;
+    TimeID: number | null;
+    FranchiseID: number | null;
+    TimeLabel: string | null; // "4:30 PM"
+  }>
+> {
+  try {
+    const sid = coerceInt(studentId);
+    const pool = await getPool();
+    const req = pool.request();
+    req.input("sid", sql.Int, sid);
+
+    // NOTE: adjust schema/table name if yours differs
+    const rs = await req.query(`
+      SELECT
+        ms.StudentID1 AS StudentID,
+        ms.Day        AS Day,
+        ms.TimeID     AS TimeID,
+        ms.FranchiseID AS FranchiseID
+      FROM dpinkney_TC.dbo.tblMasterSchedule AS ms
+      WHERE ms.StudentID1 = @sid
+      ORDER BY
+        CASE
+          WHEN ms.Day = 'Monday' THEN 1
+          WHEN ms.Day = 'Tuesday' THEN 2
+          WHEN ms.Day = 'Wednesday' THEN 3
+          WHEN ms.Day = 'Thursday' THEN 4
+          WHEN ms.Day = 'Friday' THEN 5
+          WHEN ms.Day = 'Saturday' THEN 6
+          WHEN ms.Day = 'Sunday' THEN 7
+          ELSE 99
+        END,
+        ms.TimeID ASC
+    `);
+
+    const rows = (rs.recordset || []) as any[];
+
+    const mapped = await Promise.all(
+      rows.map(async (r) => {
+        const tid = r.TimeID != null ? Number(r.TimeID) : null;
+        const timeLabel = tid != null && Number.isFinite(tid) ? await getTimeLabel(tid) : null;
+
+        return {
+          StudentID: Number(r.StudentID),
+          Day: r.Day != null ? String(r.Day) : null,
+          TimeID: tid,
+          FranchiseID: r.FranchiseID != null ? Number(r.FranchiseID) : null,
+          TimeLabel: timeLabel ?? null,
+        };
+      })
+    );
+
+    return mapped;
+  } catch (e) {
+    console.error("Error getting master schedule:", e);
+    return [];
+  }
+}
+
 /* ------------------------ Sessions (date-only for stability) ------------------------ */
 /**
  * We fetch date-only (ISO) and TimeID, then format time with getTimeLabel().
@@ -178,7 +250,7 @@ export async function getSessions(studentId: number | string) {
           Day: day ?? null,
           TimeID: row.TimeID,
           Time: timeStr ?? "Unknown",
-          category: (!isNaN(d.getTime()) && d < new Date()) ? "recent" : "upcoming",
+          category: !isNaN(d.getTime()) && d < new Date() ? "recent" : "upcoming",
           FormattedDate: !isNaN(d.getTime())
             ? d.toLocaleDateString("en-US", {
                 weekday: "long",
@@ -266,7 +338,6 @@ export async function getHoursBalance(inquiryId: number | string) {
 /* ------------------------ Student Reviews (tblStudentFeedback) ------------------------ */
 /**
  * Pulls session feedback for a given student within an optional [fromDate, toDate) window.
-
  */
 export async function getStudentReviews(
   studentId: number | string,
@@ -279,21 +350,21 @@ export async function getStudentReviews(
   const pool = await getPool();
 
   const hasFrom = typeof opts?.fromDate === "string" && !!opts!.fromDate;
-  const hasTo   = typeof opts?.toDate   === "string" && !!opts!.toDate;
+  const hasTo = typeof opts?.toDate === "string" && !!opts!.toDate;
 
-  const dateWhere = hasFrom && hasTo
-    ? "AND CAST(s.ScheduleDate AS date) >= @fromDate AND CAST(s.ScheduleDate AS date) < @toDate"
-    : hasFrom
+  const dateWhere =
+    hasFrom && hasTo
+      ? "AND CAST(s.ScheduleDate AS date) >= @fromDate AND CAST(s.ScheduleDate AS date) < @toDate"
+      : hasFrom
       ? "AND CAST(s.ScheduleDate AS date) >= @fromDate"
       : hasTo
-        ? "AND CAST(s.ScheduleDate AS date) < @toDate"
-        : "";
-
+      ? "AND CAST(s.ScheduleDate AS date) < @toDate"
+      : "";
 
   const countReq = pool.request();
   countReq.input("sid", sql.Int, sid);
   if (hasFrom) countReq.input("fromDate", sql.Date, opts!.fromDate);
-  if (hasTo)   countReq.input("toDate",   sql.Date, opts!.toDate);
+  if (hasTo) countReq.input("toDate", sql.Date, opts!.toDate);
 
   const countSql = `
     SELECT COUNT(*) AS Total
@@ -305,13 +376,12 @@ export async function getStudentReviews(
   `;
   const total = Number((await countReq.query(countSql)).recordset?.[0]?.Total ?? 0);
 
-
   const rowsReq = pool.request();
   rowsReq.input("sid", sql.Int, sid);
   if (hasFrom) rowsReq.input("fromDate", sql.Date, opts!.fromDate);
-  if (hasTo)   rowsReq.input("toDate",   sql.Date, opts!.toDate);
+  if (hasTo) rowsReq.input("toDate", sql.Date, opts!.toDate);
   rowsReq.input("offset", sql.Int, offset);
-  rowsReq.input("limit",  sql.Int, limit);
+  rowsReq.input("limit", sql.Int, limit);
 
   const rowsSql = `
     SELECT
