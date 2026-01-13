@@ -1,5 +1,6 @@
 // server/index.ts
 import dotenv from "dotenv";
+import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 

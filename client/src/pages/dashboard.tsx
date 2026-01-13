@@ -57,6 +57,19 @@ type WeeklyReviewsResp = {
   toDate: string;
 };
 
+/** Master Schedule types */
+type MasterScheduleRow = {
+  InquiryID: number; // backend can include; we won't show it
+  Day: string | null;
+  TimeID: number | null;
+  FranchiseID: number | null; // backend can include; we won't show it
+  TimeLabel: string | null; // start time label from backend (often "4:30 PM" etc)
+};
+
+type MasterScheduleResp = {
+  rows: MasterScheduleRow[];
+};
+
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -88,10 +101,7 @@ export default function Dashboard() {
   const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
   const hideHours = !!dashboardData?.uiPolicy?.hideHours;
 
-  const todayDateStr = useMemo(
-    () => new Date().toISOString().slice(0, 10),
-    []
-  );
+  const todayDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const nowLocalHHMM = useMemo(() => {
     const n = new Date();
     const hh = String(n.getHours()).padStart(2, "0");
@@ -122,22 +132,14 @@ export default function Dashboard() {
       return isNaN(d2.getTime()) ? null : d2;
     }
     if (isoOrAny instanceof Date) {
-      return new Date(
-        isoOrAny.getFullYear(),
-        isoOrAny.getMonth(),
-        isoOrAny.getDate()
-      );
+      return new Date(isoOrAny.getFullYear(), isoOrAny.getMonth(), isoOrAny.getDate());
     }
     const d3 = new Date(String(isoOrAny));
-    return isNaN(d3.getTime())
-      ? null
-      : new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
+    return isNaN(d3.getTime()) ? null : new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
   };
 
   const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
   const formatMonthDayYear = (d: Date | null) =>
     d && !isNaN(d.getTime())
@@ -147,6 +149,59 @@ export default function Dashboard() {
           day: "numeric",
         })
       : "N/A";
+
+  /**
+   * Convert a start label into "h:mm – h:mm" (1 hour range)
+   * Accepts: "4:30 PM", "4 PM", "16:30", "16:30:00"
+   */
+  const toOneHourRange = (startLabel: string | null | undefined) => {
+    if (!startLabel) return "N/A";
+    const s = String(startLabel).trim();
+
+    let h: number | null = null;
+    let m = 0;
+
+    // 12-hour: "4:30 PM" or "4 PM"
+    const m12 = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+    if (m12) {
+      h = parseInt(m12[1], 10);
+      m = parseInt(m12[2] ?? "0", 10);
+      const ap = m12[3].toUpperCase();
+      if (h === 12) h = 0;
+      if (ap === "PM") h += 12;
+    }
+
+    // 24-hour: "16:30" or "16:30:00"
+    const m24 = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (h === null && m24) {
+      h = parseInt(m24[1], 10);
+      m = parseInt(m24[2], 10);
+    }
+
+    if (h === null || h < 0 || h > 23 || m < 0 || m > 59) return s;
+
+    const startMin = h * 60 + m;
+    const endMin = startMin + 60;
+
+    const fmt = (mins: number) => {
+      const mm = String(mins % 60).padStart(2, "0");
+      let hh = Math.floor(mins / 60) % 12;
+      if (hh === 0) hh = 12;
+      return `${hh}:${mm}`;
+    };
+
+    return `${fmt(startMin)} – ${fmt(endMin)}`;
+  };
+
+  const DAY_ORDER: Record<string, number> = {
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+    sunday: 7,
+  };
 
   const students: any[] = dashboardData?.students ?? [];
   const sessions: any[] = dashboardData?.sessions ?? [];
@@ -186,9 +241,7 @@ export default function Dashboard() {
   const recentSessions = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const thirtyDaysAgo = new Date(
-      today.getTime() - 30 * 24 * 60 * 60 * 1000
-    );
+    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
     return sessionsForSelected
       .filter((s) => {
         const d = parseSessionDate(s);
@@ -210,80 +263,11 @@ export default function Dashboard() {
       .slice(0, 4);
   }, [sessionsForSelected]);
 
-  const upcomingAllForSelected = useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return sessionsForSelected
-      .filter((s) => {
-        const d = parseSessionDate(s);
-        return d !== null && d >= today;
-      })
-      .sort((a, b) => sessionSortKey(a) - sessionSortKey(b));
-  }, [sessionsForSelected]);
-
-  const currentSessionOptions = useMemo(() => {
-    const source = upcomingAllForSelected.length
-      ? upcomingAllForSelected
-      : sessionsForSelected;
-    return source.map((s: any) => {
-      const d = parseSessionDate(s);
-      return {
-        value: `${s.Day || ""} ${s.Time || ""}`.trim(),
-        label: `${formatMonthDayYear(d)} — ${s.Day || "Day"} ${
-          s.Time || "Time"
-        }`,
-      };
-    });
-  }, [upcomingAllForSelected, sessionsForSelected]);
-
-  const timeOptions = useMemo(() => {
-    const opts = [];
-    for (let h = 0; h < 24; h++) {
-      for (let m = 0; m < 60; m += 15) {
-        const hh = String(h).padStart(2, "0");
-        const mm = String(m).padStart(2, "0");
-        const value = `${hh}:${mm}`;
-        const label = new Date(`1970-01-01T${value}:00`).toLocaleTimeString(
-          "en-US",
-          {
-            hour: "numeric",
-            minute: "2-digit",
-          }
-        );
-        opts.push({ value, label });
-      }
-    }
-    return opts;
-  }, []);
-
-  const filteredCurrentSessionOptions = useMemo(() => {
-    if (!reqCurrent) return currentSessionOptions;
-    const term = reqCurrent.toLowerCase();
-    return currentSessionOptions.filter(
-      (o) =>
-        o.label.toLowerCase().includes(term) ||
-        o.value.toLowerCase().includes(term)
-    );
-  }, [currentSessionOptions, reqCurrent]);
-
-  const filteredTimeOptions = useMemo(() => {
-    if (!reqTime) return timeOptions;
-    const term = reqTime.toLowerCase();
-    return timeOptions.filter(
-      (o) => o.label.toLowerCase().includes(term) || o.value.includes(term)
-    );
-  }, [reqTime, timeOptions]);
-
   // ================== BILLING rows: 30 most current sessions (except today) ==================
   const billingRows: any[] = billing?.account_details ?? [];
 
   const getRowDate = (row: any): Date | null => {
-    const raw =
-      row?.Date ??
-      row?.TransactionDate ??
-      row?.PostedDate ??
-      row?.FormattedDate ??
-      null;
+    const raw = row?.Date ?? row?.TransactionDate ?? row?.PostedDate ?? row?.FormattedDate ?? null;
     return parseDateOnly(raw);
   };
 
@@ -295,11 +279,7 @@ export default function Dashboard() {
 
   const current30SessionRows = useMemo(() => {
     const today = new Date();
-    const todayDateOnly = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate()
-    );
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
     return (billingRows || [])
       .filter(isSessionRow)
@@ -332,11 +312,59 @@ export default function Dashboard() {
   } = useQuery<WeeklyReviewsResp>({
     queryKey: ["/api/students", selectedStudentId, "reviews", "week"],
     enabled: selectedStudentId != null,
-    queryFn: () =>
-      getJSON<WeeklyReviewsResp>(
-        `/api/students/${selectedStudentId}/reviews/week`
-      ),
+    queryFn: () => getJSON<WeeklyReviewsResp>(`/api/students/${selectedStudentId}/reviews/week`),
   });
+
+  /** Master schedule query */
+  const {
+    data: masterSchedule,
+    isLoading: masterScheduleLoading,
+    error: masterScheduleError,
+  } = useQuery<MasterScheduleResp>({
+    queryKey: ["/api/students", selectedStudentId, "master-schedule"],
+    enabled: selectedStudentId != null,
+    queryFn: () => getJSON<MasterScheduleResp>(`/api/students/${selectedStudentId}/master-schedule`),
+  });
+
+  /** Group/sort master schedule for nicer visualization */
+  const masterScheduleByDay = useMemo(() => {
+    const rows = masterSchedule?.rows ?? [];
+    const norm = rows
+      .map((r) => ({
+        day: (r.Day || "").trim(),
+        range: toOneHourRange(r.TimeLabel),
+      }))
+      .filter((x) => !!x.day);
+
+    const map = new Map<string, string[]>();
+    for (const item of norm) {
+      const key = item.day;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(item.range);
+    }
+
+    const sortKey = (range: string) => {
+      const m = range.match(/^(\d{1,2}):(\d{2})\s*[–-]/);
+      if (!m) return 999999;
+      let hh = parseInt(m[1], 10);
+      const mm = parseInt(m[2], 10);
+      if (hh === 12) hh = 0;
+      return hh * 60 + mm;
+    };
+
+    const days = Array.from(map.keys()).sort((a, b) => {
+      const da = DAY_ORDER[a.toLowerCase()] ?? 99;
+      const db = DAY_ORDER[b.toLowerCase()] ?? 99;
+      if (da !== db) return da - db;
+      return a.localeCompare(b);
+    });
+
+    return days.map((day) => {
+      const ranges = (map.get(day) ?? []).slice().sort((x, y) => sortKey(x) - sortKey(y));
+      const uniq = Array.from(new Set(ranges));
+      return { day, ranges: uniq };
+    });
+  }, [masterSchedule]);
 
   const handleLogout = async () => {
     try {
@@ -348,9 +376,7 @@ export default function Dashboard() {
   };
 
   function buildEmailParts() {
-    const subject = `Schedule Change Request — ${
-      reqStudent || "Student"
-    }`.replace(/\s+/g, " ").trim();
+    const subject = `Schedule Change Request — ${reqStudent || "Student"}`.replace(/\s+/g, " ").trim();
 
     const prettyDate = reqDate
       ? new Date(reqDate).toLocaleDateString("en-US", {
@@ -410,9 +436,7 @@ export default function Dashboard() {
       )}&subject=${subjectEnc}&body=${bodyEnc}`;
       const w2 = window.open(outlook, "_blank", "noopener,noreferrer");
       if (!w2) {
-        const mailto = `mailto:${encodeURIComponent(
-          to
-        )}?subject=${subjectEnc}&body=${bodyEnc}`;
+        const mailto = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
         window.location.href = mailto;
       }
     }
@@ -420,9 +444,7 @@ export default function Dashboard() {
 
   function openMailto(to: string) {
     const { subjectEnc, bodyEnc } = buildEmailParts();
-    const mailto = `mailto:${encodeURIComponent(
-      to
-    )}?subject=${subjectEnc}&body=${bodyEnc}`;
+    const mailto = `mailto:${encodeURIComponent(to)}?subject=${subjectEnc}&body=${bodyEnc}`;
     window.location.href = mailto;
   }
 
@@ -439,16 +461,12 @@ export default function Dashboard() {
       }
       const now = new Date();
       if (selectedDateTime.getTime() < now.getTime()) {
-        alert(
-          "Please choose a new schedule start date/time that is in the future."
-        );
+        alert("Please choose a new schedule start date/time that is in the future.");
         return;
       }
     }
     const to = await resolveCenterEmail();
-    const isMobile = /android|iphone|ipad|ipod|windows phone/i.test(
-      navigator.userAgent
-    );
+    const isMobile = /android|iphone|ipad|ipod|windows phone/i.test(navigator.userAgent);
     if (isMobile) openMailto(to);
     else openGmailCompose(to);
   }
@@ -523,11 +541,7 @@ export default function Dashboard() {
           <div className="container">
             <div className="d-flex justify-content-between align-items-center">
               <div className="header-brand">
-                <img
-                  src={logoPath}
-                  alt="Tutoring Club Logo"
-                  className="header-logo"
-                />
+                <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
                 <h1 className="header-title">Tutoring Club Parent Portal</h1>
               </div>
               <div className="text-end">
@@ -537,10 +551,7 @@ export default function Dashboard() {
                 <div className="text-muted small mb-2">
                   Students: {students.map((s: any) => s.name).join(", ")}
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="btn btn-outline-primary btn-sm"
-                >
+                <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                   Logout
                 </button>
               </div>
@@ -564,11 +575,7 @@ export default function Dashboard() {
               </a>
             </li>
             <li className="nav-item" role="presentation">
-              <a
-                className="nav-link active"
-                href="#"
-                onClick={(e) => e.preventDefault()}
-              >
+              <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
                 Schedule Updates
               </a>
             </li>
@@ -588,58 +595,88 @@ export default function Dashboard() {
             )}
           </ul>
 
-          <h3 style={{ marginBottom: "30px" }}>Schedule Management</h3>
+          <h3 style={{ marginBottom: "18px" }}>Schedule Management</h3>
 
-          {/* Upcoming full table */}
-          {selectedStudent && upcomingAllForSelected.length > 0 ? (
+          {/* Week cards (badge removed) */}
+          {!selectedStudent ? (
+            <div className="alert alert-info">Please select a student to view schedule.</div>
+          ) : (
             <div className="card mb-4">
               <div className="card-header">
-                <h5 style={{ color: "white", margin: 0 }}>
-                  Upcoming Schedule for {selectedStudent} (
-                  {upcomingAllForSelected.length})
-                </h5>
+                <h5 style={{ color: "white", margin: 0 }}>Master Schedule for {selectedStudent}</h5>
               </div>
               <div className="card-body">
-                <div className="table-container">
-                  <table className="table table-striped table-sm">
-                    <thead>
-                      <tr>
-                        <th>Day</th>
-                        <th>Time</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {upcomingAllForSelected.map(
-                        (session: any, index: number) => {
-                          const d = parseSessionDate(session);
-                          return (
-                            <tr key={index}>
-                              <td>{session.Day || "N/A"}</td>
-                              <td>{session.Time || "N/A"}</td>
-                              <td>{formatMonthDayYear(d)}</td>
-                              <td>Active</td>
-                            </tr>
-                          );
-                        }
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                {masterScheduleLoading ? (
+                  <div className="text-muted">Loading master schedule…</div>
+                ) : masterScheduleError ? (
+                  <div className="alert alert-danger">
+                    {(masterScheduleError as any)?.message || "Failed to load master schedule"}
+                  </div>
+                ) : (masterScheduleByDay?.length ?? 0) === 0 ? (
+                  <div className="alert alert-info mb-0">No master schedule found for {selectedStudent}.</div>
+                ) : (
+                  <>
+                    <div className="text-muted small mb-3">
+                      Times shown as 1-hour blocks.
+                    </div>
+
+                    <div className="row g-3">
+                      {masterScheduleByDay.map(({ day, ranges }) => (
+                        <div key={day} className="col-12 col-md-6 col-lg-4">
+                          <div
+                            className="card h-100"
+                            style={{
+                              border: "1px solid #e9ecef",
+                              boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+                              borderRadius: "12px",
+                            }}
+                          >
+                            <div
+                              className="card-header d-flex justify-content-between align-items-center"
+                              style={{
+                                background: "rgba(74, 122, 166, 0.08)",
+                                borderBottom: "1px solid #e9ecef",
+                              }}
+                            >
+                              <div className="fw-semibold" style={{ color: "var(--tutoring-blue)" }}>
+                                {day}
+                              </div>
+
+                              {/* ✅ removed the count badge here */}
+                            </div>
+
+                            <div className="card-body">
+                              <div className="d-flex flex-wrap gap-2">
+                                {ranges.map((range, i) => (
+                                  <span
+                                    key={`${day}-${range}-${i}`}
+                                    className="badge bg-primary-subtle text-primary border"
+                                    style={{
+                                      padding: "8px 10px",
+                                      borderRadius: "999px",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {range}
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="mt-3 small text-muted">
+                                
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-            </div>
-          ) : selectedStudent ? (
-            <div className="alert alert-info">
-              No upcoming sessions for {selectedStudent}.
-            </div>
-          ) : (
-            <div className="alert alert-info">
-              Please select a student to view upcoming schedule.
             </div>
           )}
 
-          {/* ======= Schedule Change Request Form (refined) ======= */}
+          {/* ======= Schedule Change Request Form (unchanged) ======= */}
           <div className="card">
             <div className="card-header d-flex align-items-center">
               <i className="fas fa-calendar-check me-2"></i>
@@ -648,9 +685,8 @@ export default function Dashboard() {
 
             <div className="card-body">
               <p className="text-muted mb-4">
-                Use this form to request a new start date/time or describe a
-                change to your student’s current session. We’ll email your
-                center with the details.
+                Use this form to request a new start date/time or describe a change to your student’s current session.
+                We’ll email your center with the details.
               </p>
 
               <form onSubmit={(e) => e.preventDefault()} noValidate>
@@ -662,10 +698,7 @@ export default function Dashboard() {
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
-                        <i
-                          className="fas fa-user-graduate"
-                          aria-hidden="true"
-                        ></i>
+                        <i className="fas fa-user-graduate" aria-hidden="true"></i>
                       </span>
                       <select
                         className="form-control"
@@ -675,10 +708,11 @@ export default function Dashboard() {
                         required
                         value={reqStudentId ?? ""}
                         onChange={(e) => {
-                          const id = e.target.value
-                            ? Number(e.target.value)
-                            : null;
-                          setStudentById(id);
+                          const id = e.target.value ? Number(e.target.value) : null;
+                          setReqStudentId(id);
+                          const name = students.find((s: any) => s.id === id)?.name || "";
+                          setReqStudent(name);
+                          setSelectedStudent(name);
                         }}
                       >
                         <option value="">Select a student…</option>
@@ -689,19 +723,14 @@ export default function Dashboard() {
                         ))}
                       </select>
                     </div>
-                    <div className="form-text">
-                      Choose the student this change applies to.
-                    </div>
+                    <div className="form-text">Choose the student this change applies to.</div>
                   </div>
 
                   <div className="col-md-6">
                     <label htmlFor="current_session" className="form-label">
                       Current Session <span className="text-danger">*</span>
                     </label>
-                    <div
-                      className="input-group position-relative"
-                      style={{ zIndex: 10 }}
-                    >
+                    <div className="input-group position-relative" style={{ zIndex: 10 }}>
                       <span className="input-group-text">
                         <i className="fas fa-clock" aria-hidden="true"></i>
                       </span>
@@ -716,68 +745,55 @@ export default function Dashboard() {
                         value={reqCurrent}
                         onChange={(e) => setReqCurrent(e.target.value)}
                         onFocus={() => setShowCurrentOptions(true)}
-                        onBlur={() =>
-                          setTimeout(
-                            () => setShowCurrentOptions(false),
-                            120
-                          )
-                        }
+                        onBlur={() => setTimeout(() => setShowCurrentOptions(false), 120)}
                         style={{
                           background: "white",
-                          color: "#2c3e50",
                           borderColor: "#ced4da",
                           colorScheme: "light",
                         }}
                       />
-                      {showCurrentOptions &&
-                        filteredCurrentSessionOptions.length > 0 && (
-                          <div
-                            className="shadow-sm"
-                            style={{
-                              position: "absolute",
-                              top: "100%",
-                              left: "40px",
-                              right: 0,
-                              background: "white",
-                              border: "1px solid #ced4da",
-                              borderTop: "none",
-                              borderRadius: "0 0 6px 6px",
-                              maxHeight: "220px",
-                              overflowY: "auto",
-                            }}
-                          >
-                            {filteredCurrentSessionOptions.map((o, i) => (
-                              <button
-                                type="button"
-                                key={`${o.value}-${i}`}
-                                className="w-100 text-start px-3 py-2"
-                                style={{
-                                  background: "white",
-                                  border: "none",
-                                  borderBottom: "1px solid #f1f1f1",
-                                  color: "#2c3e50",
-                                  fontSize: "14px",
-                                }}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => {
-                                  setReqCurrent(o.value);
-                                  setShowCurrentOptions(false);
-                                }}
-                              >
-                                <div className="fw-semibold">
-                                  {o.value || o.label}
-                                </div>
-                                <div className="text-muted small">
-                                  {o.label}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                      {showCurrentOptions && filteredCurrentSessionOptions.length > 0 && (
+                        <div
+                          className="shadow-sm"
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "40px",
+                            right: 0,
+                            background: "white",
+                            border: "1px solid #ced4da",
+                            borderTop: "none",
+                            borderRadius: "0 0 6px 6px",
+                            maxHeight: "220px",
+                            overflowY: "auto",
+                          }}
+                        >
+                          {filteredCurrentSessionOptions.map((o, i) => (
+                            <button
+                              type="button"
+                              key={`${o.value}-${i}`}
+                              className="w-100 text-start px-3 py-2"
+                              style={{
+                                background: "white",
+                                border: "none",
+                                borderBottom: "1px solid #f1f1f1",
+                                color: "#2c3e50",
+                                fontSize: "14px",
+                              }}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setReqCurrent(o.value);
+                                setShowCurrentOptions(false);
+                              }}
+                            >
+                              <div className="fw-semibold">{o.value || o.label}</div>
+                              <div className="text-muted small">{o.label}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="form-text">
-                      Tell us the student's current day/time.
-                    </div>
+                    <div className="form-text">Tell us the student's current day/time.</div>
                   </div>
                 </div>
 
@@ -787,15 +803,11 @@ export default function Dashboard() {
                 <div className="row g-3">
                   <div className="col-md-6">
                     <label htmlFor="preferred_date" className="form-label">
-                      New Schedule Start Date{" "}
-                      <span className="text-danger">*</span>
+                      New Schedule Start Date <span className="text-danger">*</span>
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
-                        <i
-                          className="fas fa-calendar-day"
-                          aria-hidden="true"
-                        ></i>
+                        <i className="fas fa-calendar-day" aria-hidden="true"></i>
                       </span>
                       <input
                         type="date"
@@ -813,18 +825,11 @@ export default function Dashboard() {
 
                   <div className="col-md-6">
                     <label htmlFor="preferred_time" className="form-label">
-                      New Schedule Start Time{" "}
-                      <span className="text-danger">*</span>
+                      New Schedule Start Time <span className="text-danger">*</span>
                     </label>
-                    <div
-                      className="input-group position-relative"
-                      style={{ zIndex: 9 }}
-                    >
+                    <div className="input-group position-relative" style={{ zIndex: 9 }}>
                       <span className="input-group-text">
-                        <i
-                          className="fas fa-hourglass-start"
-                          aria-hidden="true"
-                        ></i>
+                        <i className="fas fa-hourglass-start" aria-hidden="true"></i>
                       </span>
                       <input
                         type="time"
@@ -834,75 +839,17 @@ export default function Dashboard() {
                         autoComplete="off"
                         required
                         value={reqTime}
-                        min={
-                          reqDate === todayDateStr ? nowLocalHHMM : undefined
-                        }
+                        min={reqDate === todayDateStr ? nowLocalHHMM : undefined}
                         onChange={(e) => setReqTime(e.target.value)}
                         onFocus={() => setShowTimeOptions(true)}
                         onClick={() => setShowTimeOptions(true)}
-                        onBlur={() =>
-                          setTimeout(() => setShowTimeOptions(false), 120)
-                        }
+                        onBlur={() => setTimeout(() => setShowTimeOptions(false), 120)}
                         style={{
                           background: "white",
-                          color: "#2c3e50",
                           borderColor: "#ced4da",
                           colorScheme: "light",
                         }}
                       />
-                      <button
-                        type="button"
-                        className="input-group-text"
-                        style={{ cursor: "pointer" }}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => setShowTimeOptions((v) => !v)}
-                        aria-label="Open time picker"
-                      >
-                        <i className="fas fa-clock"></i>
-                      </button>
-                      {showTimeOptions &&
-                        filteredTimeOptions.length > 0 && (
-                          <div
-                            className="shadow-sm"
-                            style={{
-                              position: "absolute",
-                              top: "100%",
-                              left: "40px",
-                              right: 0,
-                              background: "white",
-                              border: "1px solid #ced4da",
-                              borderTop: "none",
-                              borderRadius: "0 0 6px 6px",
-                              maxHeight: "240px",
-                              overflowY: "auto",
-                            }}
-                          >
-                            {filteredTimeOptions.map((o, i) => (
-                              <button
-                                type="button"
-                                key={`${o.value}-${i}`}
-                                className="w-100 text-start px-3 py-2"
-                                style={{
-                                  background: "white",
-                                  border: "none",
-                                  borderBottom: "1px solid #f1f1f1",
-                                  color: "#2c3e50",
-                                  fontSize: "14px",
-                                }}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => {
-                                  setReqTime(o.value);
-                                  setShowTimeOptions(false);
-                                }}
-                              >
-                                <div className="fw-semibold">{o.label}</div>
-                                <div className="text-muted small">
-                                  {o.value}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
                     </div>
                   </div>
                 </div>
@@ -912,12 +859,8 @@ export default function Dashboard() {
                 {/* Row 3: Requested Change + Reason */}
                 <div className="row g-3">
                   <div className="col-md-7">
-                    <label
-                      htmlFor="requested_change"
-                      className="form-label"
-                    >
-                      Requested Change{" "}
-                      <span className="text-danger">*</span>
+                    <label htmlFor="requested_change" className="form-label">
+                      Requested Change <span className="text-danger">*</span>
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
@@ -935,9 +878,7 @@ export default function Dashboard() {
                         onChange={(e) => setReqChange(e.target.value)}
                       />
                     </div>
-                    <div className="form-text">
-                      Please include any specific days, times, or constraints.
-                    </div>
+                    <div className="form-text">Please include any specific days, times, or constraints.</div>
                   </div>
 
                   <div className="col-md-5">
@@ -946,10 +887,7 @@ export default function Dashboard() {
                     </label>
                     <div className="input-group">
                       <span className="input-group-text">
-                        <i
-                          className="fas fa-comment-dots"
-                          aria-hidden="true"
-                        ></i>
+                        <i className="fas fa-comment-dots" aria-hidden="true"></i>
                       </span>
                       <textarea
                         className="form-control"
@@ -965,13 +903,8 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Actions */}
                 <div className="d-flex flex-wrap gap-2 mt-4">
-                  <button
-                    type="button"
-                    className="btn btn-success"
-                    onClick={handleScheduleSubmit}
-                  >
+                  <button type="button" className="btn btn-success" onClick={handleScheduleSubmit}>
                     <i className="fas fa-paper-plane me-2"></i>
                     Submit Request
                   </button>
@@ -1006,16 +939,11 @@ export default function Dashboard() {
   if (activeTab === "billing" && !hideBilling) {
     return (
       <div>
-        {/* Header */}
         <div className="header-section">
           <div className="container">
             <div className="d-flex justify-content-between align-items-center">
               <div className="header-brand">
-                <img
-                  src={logoPath}
-                  alt="Tutoring Club Logo"
-                  className="header-logo"
-                />
+                <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
                 <h1 className="header-title">Tutoring Club Parent Portal</h1>
               </div>
               <div className="text-end">
@@ -1025,10 +953,7 @@ export default function Dashboard() {
                 <div className="text-muted small mb-2">
                   Students: {students.map((s: any) => s.name).join(", ")}
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="btn btn-outline-primary btn-sm"
-                >
+                <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                   Logout
                 </button>
               </div>
@@ -1037,7 +962,6 @@ export default function Dashboard() {
         </div>
 
         <div className="container mt-4">
-          {/* Tabs */}
           <ul className="nav nav-tabs" role="tablist">
             <li className="nav-item" role="presentation">
               <a
@@ -1065,56 +989,41 @@ export default function Dashboard() {
             </li>
             {!hideBilling && (
               <li className="nav-item" role="presentation">
-                <a
-                  className="nav-link active"
-                  href="#"
-                  onClick={(e) => e.preventDefault()}
-                >
+                <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
                   Billing Information
                 </a>
               </li>
             )}
           </ul>
 
-          {/* Summary (hours remaining) */}
           <div className="card mb-4">
             <div className="card-header">
-              <h5 style={{ color: "white", margin: 0 }}>
-                Account Balance Summary
-              </h5>
+              <h5 style={{ color: "white", margin: 0 }}>Account Balance Summary</h5>
             </div>
             <div className="card-body">
               <div className="d-flex justify-content-between">
                 <div>
                   <div className="text-muted small mb-1">Hours Remaining</div>
-                  <div
-                    className="h4 mb-0"
-                    style={{ color: "var(--tutoring-blue)" }}
-                  >
+                  <div className="h4 mb-0" style={{ color: "var(--tutoring-blue)" }}>
                     {hideHours
                       ? "Restricted"
-                      : ((typeof billing?.remaining_hours === "number"
+                      : (typeof billing?.remaining_hours === "number"
                           ? billing.remaining_hours.toFixed(1)
-                          : "0.0") + " hours")}
+                          : "0.0") + " hours"}
                   </div>
                 </div>
                 <div className="text-end">
                   <div className="text-muted small mb-1">Students</div>
-                  <div className="fw-semibold">
-                    {students.map((s: any) => s.name).join(", ")}
-                  </div>
+                  <div className="fw-semibold">{students.map((s: any) => s.name).join(", ")}</div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Account Details: 30 MOST CURRENT SESSIONS (EXCEPT TODAY) */}
           <div className="card mb-4">
             <div className="card-header d-flex justify-content-between align-items-center">
               <h5 style={{ color: "white", margin: 0 }}>Account Details</h5>
-              <small className="text-light">
-                30 most current sessions (excluding today)
-              </small>
+              <small className="text-light">30 most current sessions (excluding today)</small>
             </div>
             <div className="card-body">
               <div className="table-container">
@@ -1134,50 +1043,37 @@ export default function Dashboard() {
                   </thead>
                   <tbody>
                     {current30SessionRows.length ? (
-                      current30SessionRows.map(
-                        (detail: any, index: number) => {
-                          const d = getRowDate(detail);
-                          const dateLabel = formatMonthDayYear(d);
+                      current30SessionRows.map((detail: any, index: number) => {
+                        const d = getRowDate(detail);
+                        const dateLabel = formatMonthDayYear(d);
 
-                          const adjNum = Number(detail.Adjustment ?? 0);
-                          const adjClass =
-                            Number.isFinite(adjNum) && adjNum !== 0
-                              ? adjNum > 0
-                                ? "text-success"
-                                : "text-danger"
-                              : "";
+                        const adjNum = Number(detail.Adjustment ?? 0);
+                        const adjClass =
+                          Number.isFinite(adjNum) && adjNum !== 0
+                            ? adjNum > 0
+                              ? "text-success"
+                              : "text-danger"
+                            : "";
 
-                          return (
-                            <tr key={index}>
-                              {!cols.hideDate && <td>{dateLabel}</td>}
-                              {!cols.hideStudent && (
-                                <td>{detail.Student || "N/A"}</td>
-                              )}
-                              {!cols.hideEventType && (
-                                <td>{detail.EventType || "N/A"}</td>
-                              )}
-                              {!cols.hideAttendance && (
-                                <td>{detail.Attendance || "N/A"}</td>
-                              )}
-                              {!cols.hideAdjustment && (
-                                <td className={`text-end ${adjClass}`}>
-                                  {Number.isFinite(adjNum)
-                                    ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(
-                                        2
-                                      )}`
-                                    : String(detail.Adjustment ?? 0)}
-                                </td>
-                              )}
-                            </tr>
-                          );
-                        }
-                      )
+                        return (
+                          <tr key={index}>
+                            {!cols.hideDate && <td>{dateLabel}</td>}
+                            {!cols.hideStudent && <td>{detail.Student || "N/A"}</td>}
+                            {!cols.hideEventType && <td>{detail.EventType || "N/A"}</td>}
+                            {!cols.hideAttendance && <td>{detail.Attendance || "N/A"}</td>}
+                            {!cols.hideAdjustment && (
+                              <td className={`text-end ${adjClass}`}>
+                                {Number.isFinite(adjNum)
+                                  ? `${adjNum > 0 ? "+" : ""}${adjNum.toFixed(2)}`
+                                  : String(detail.Adjustment ?? 0)}
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })
                     ) : (
                       <tr>
-                        <td
-                          colSpan={5}
-                          className="text-center text-muted"
-                        >
+                        <td colSpan={5} className="text-center text-muted">
                           No session records available.
                         </td>
                       </tr>
@@ -1185,15 +1081,13 @@ export default function Dashboard() {
                   </tbody>
                 </table>
 
-                {/* If all columns are hidden, show a friendly message */}
                 {cols.hideDate &&
                   cols.hideStudent &&
                   cols.hideEventType &&
                   cols.hideAttendance &&
                   cols.hideAdjustment && (
                     <div className="alert alert-info mt-3">
-                      Columns are hidden by your center. If you feel this is a
-                      mistake, please contact the center.
+                      Columns are hidden by your center. If you feel this is a mistake, please contact the center.
                     </div>
                   )}
               </div>
@@ -1212,11 +1106,7 @@ export default function Dashboard() {
         <div className="container">
           <div className="d-flex justify-content-between align-items-center">
             <div className="header-brand">
-              <img
-                src={logoPath}
-                alt="Tutoring Club Logo"
-                className="header-logo"
-              />
+              <img src={logoPath} alt="Tutoring Club Logo" className="header-logo" />
               <h1 className="header-title">Tutoring Club Parent Portal</h1>
             </div>
             <div className="text-end">
@@ -1226,10 +1116,7 @@ export default function Dashboard() {
               <div className="text-muted small mb-2">
                 Students: {students.map((s: any) => s.name).join(", ")}
               </div>
-              <button
-                onClick={handleLogout}
-                className="btn btn-outline-primary btn-sm"
-              >
+              <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                 Logout
               </button>
             </div>
@@ -1241,11 +1128,7 @@ export default function Dashboard() {
         {/* Tabs */}
         <ul className="nav nav-tabs" role="tablist">
           <li className="nav-item" role="presentation">
-            <a
-              className="nav-link active"
-              href="#"
-              onClick={(e) => e.preventDefault()}
-            >
+            <a className="nav-link active" href="#" onClick={(e) => e.preventDefault()}>
               Home
             </a>
           </li>
@@ -1283,40 +1166,26 @@ export default function Dashboard() {
             <div className="card-header">
               <h5 className="m-0">
                 <i className="fas fa-comments me-2" aria-hidden="true"></i>
-                Here is what our tutors are saying about{" "}
-                {selectedStudent || "your student"}
+                Here is what our tutors are saying about {selectedStudent || "your student"}
               </h5>
             </div>
             <div className="card-body">
               {!selectedStudent ? (
-                <div className="alert alert-info">
-                  Select a student to view reviews.
-                </div>
+                <div className="alert alert-info">Select a student to view reviews.</div>
               ) : reviewsLoading ? (
                 <div className="text-muted">Loading reviews…</div>
               ) : reviewsError ? (
-                <div className="alert alert-danger">
-                  {(reviewsError as any)?.message ||
-                    "Failed to load reviews"}
-                </div>
+                <div className="alert alert-danger">{(reviewsError as any)?.message || "Failed to load reviews"}</div>
               ) : (weeklyReviews?.rows?.length ?? 0) === 0 ? (
-                <div className="alert alert-secondary">
-                  No reviews for today or this week.
-                </div>
+                <div className="alert alert-secondary">No reviews for today or this week.</div>
               ) : (
                 <div style={{ maxHeight: 420, overflowY: "auto" }}>
                   {(() => {
                     const rows = weeklyReviews!.rows;
-                    const todayISO = new Date()
-                      .toISOString()
-                      .slice(0, 10);
+                    const todayISO = new Date().toISOString().slice(0, 10);
 
-                    const todayRows = rows.filter(
-                      (r) => r.SessionDateISO === todayISO
-                    );
-                    const weekRows = rows.filter(
-                      (r) => r.SessionDateISO !== todayISO
-                    );
+                    const todayRows = rows.filter((r) => r.SessionDateISO === todayISO);
+                    const weekRows = rows.filter((r) => r.SessionDateISO !== todayISO);
 
                     const formatDate = (iso: string) => {
                       const d = new Date(iso + "T00:00:00");
@@ -1328,49 +1197,35 @@ export default function Dashboard() {
                     };
 
                     const Item = ({ r }: { r: ReviewRow }) => (
-                      <div
-                        className="mb-3 pb-3"
-                        style={{ borderBottom: "1px solid #eee" }}
-                      >
+                      <div className="mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
                         <div className="d-flex justify-content-between align-items-start">
                           <div>
-                            <div
-                              className="fw-semibold"
-                              style={{ color: "var(--tutoring-blue)" }}
-                            >
+                            <div className="fw-semibold" style={{ color: "var(--tutoring-blue)" }}>
                               {formatDate(r.SessionDateISO)}
                             </div>
                           </div>
                           {r.CoveredMaterialsScore != null && (
-                            <span className="badge bg-primary">
-                              Materials: {r.CoveredMaterialsScore}
-                            </span>
+                            <span className="badge bg-primary">Materials: {r.CoveredMaterialsScore}</span>
                           )}
                         </div>
 
                         {r.CoveredMaterialsText && (
                           <div className="mt-2">
-                            <div className="small text-uppercase text-muted">
-                              Covered Materials
-                            </div>
+                            <div className="small text-uppercase text-muted">Covered Materials</div>
                             <div>{r.CoveredMaterialsText}</div>
                           </div>
                         )}
 
                         {r.StudentAttitudeText && (
                           <div className="mt-2">
-                            <div className="small text-uppercase text-muted">
-                              Student Attitude
-                            </div>
+                            <div className="small text-uppercase text-muted">Student Attitude</div>
                             <div>{r.StudentAttitudeText}</div>
                           </div>
                         )}
 
                         {r.OtherFeedback && (
                           <div className="mt-2">
-                            <div className="small text-uppercase text-muted">
-                              Other Feedback
-                            </div>
+                            <div className="small text-uppercase text-muted">Other Feedback</div>
                             <div>{r.OtherFeedback}</div>
                           </div>
                         )}
@@ -1382,9 +1237,7 @@ export default function Dashboard() {
                         {todayRows.length > 0 && (
                           <>
                             <div className="mb-2">
-                              <span className="badge bg-warning text-dark">
-                                Today
-                              </span>
+                              <span className="badge bg-warning text-dark">Today</span>
                             </div>
                             {todayRows.map((r, i) => (
                               <Item key={`t-${i}`} r={r} />
@@ -1394,11 +1247,7 @@ export default function Dashboard() {
 
                         {weekRows.length > 0 && (
                           <>
-                            {todayRows.length > 0 && (
-                              <div className="mt-2 mb-2 small text-muted">
-                                Earlier this week
-                              </div>
-                            )}
+                            {todayRows.length > 0 && <div className="mt-2 mb-2 small text-muted">Earlier this week</div>}
                             {weekRows.map((r, i) => (
                               <Item key={`w-${i}`} r={r} />
                             ))}
@@ -1420,9 +1269,7 @@ export default function Dashboard() {
             <div className="card">
               <div className="card-body d-flex justify-content-between align-items-start">
                 <div className="flex-grow-1">
-                  <p className="text-muted mb-2 small text-uppercase">
-                    Student Information
-                  </p>
+                  <p className="text-muted mb-2 small text-uppercase">Student Information</p>
                   <select
                     className="form-control"
                     value={selectedStudent}
@@ -1442,18 +1289,10 @@ export default function Dashboard() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-muted small mb-0 mt-1">
-                    Choose student to view details
-                  </p>
+                  <p className="text-muted small mb-0 mt-1">Choose student to view details</p>
                 </div>
                 <div className="text-end">
-                  <i
-                    className="fas fa-user"
-                    style={{
-                      color: "var(--tutoring-orange)",
-                      fontSize: "24px",
-                    }}
-                  ></i>
+                  <i className="fas fa-user" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
                 </div>
               </div>
             </div>
@@ -1472,30 +1311,14 @@ export default function Dashboard() {
               >
                 <div className="card-body d-flex justify-content-between align-items-start">
                   <div>
-                    <p className="text-muted mb-1 small text-uppercase">
-                      Account Balance
-                    </p>
-                    <h4
-                      className="mb-1"
-                      style={{ color: "var(--tutoring-blue)" }}
-                    >
-                      {typeof billing?.remaining_hours === "number"
-                        ? billing.remaining_hours.toFixed(1)
-                        : "0.0"}{" "}
-                      hours
+                    <p className="text-muted mb-1 small text-uppercase">Account Balance</p>
+                    <h4 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
+                      {typeof billing?.remaining_hours === "number" ? billing.remaining_hours.toFixed(1) : "0.0"} hours
                     </h4>
-                    <p className="text-muted small mb-0">
-                      Hours remaining
-                    </p>
+                    <p className="text-muted small mb-0">Hours remaining</p>
                   </div>
                   <div className="text-end">
-                    <i
-                      className="fas fa-hourglass"
-                      style={{
-                        color: "var(--tutoring-orange)",
-                        fontSize: "24px",
-                      }}
-                    ></i>
+                    <i className="fas fa-hourglass" style={{ color: "var(--tutoring-orange)", fontSize: "24px" }}></i>
                   </div>
                 </div>
               </div>
@@ -1505,159 +1328,99 @@ export default function Dashboard() {
 
         {/* Main Dashboard Grid (Recent + Upcoming) */}
         <div className="row">
-          {/* Recent Sessions (last 30 days) */}
           <div className="col-lg-6 mb-4">
             <div className="card">
               <div className="card-header">
                 <h6>
-                  <img
-                    src={scheduleIconPath}
-                    alt="Schedule Icon"
-                    style={{
-                      width: "20px",
-                      height: "20px",
-                      marginRight: "8px",
-                    }}
-                  />
+                  <img src={scheduleIconPath} alt="Schedule Icon" style={{ width: "20px", height: "20px", marginRight: "8px" }} />
                   Recent Sessions (Last 30 Days)
                 </h6>
               </div>
               <div className="card-body">
                 {selectedStudent && recentSessions.length > 0 ? (
-                  <div
-                    className="timeline-container"
-                    style={{ maxHeight: "300px", overflowY: "auto" }}
-                  >
-                    {recentSessions.map(
-                      (session: any, index: number) => {
-                        const d = parseSessionDate(session);
-                        return (
-                          <div
-                            key={index}
-                            className="timeline-item mb-3 pb-3"
-                            style={{
-                              borderBottom: "1px solid #eee",
-                            }}
-                          >
-                            <div className="d-flex">
-                              <div className="timeline-marker me-3 mt-1">
-                                <div
-                                  style={{
-                                    width: "8px",
-                                    height: "8px",
-                                    background: "var(--tutoring-orange)",
-                                    borderRadius: "50%",
-                                  }}
-                                ></div>
-                              </div>
-                              <div className="flex-grow-1">
-                                <h6
-                                  className="mb-1"
-                                  style={{
-                                    color: "var(--tutoring-blue)",
-                                  }}
-                                >
-                                  Session
-                                </h6>
-                                <p className="mb-1 small">
-                                  {formatMonthDayYear(d)}
-                                </p>
-                                <p className="mb-0 text-muted small">
-                                  {(session?.Day || "N/A")} •{" "}
-                                  {(session?.Time || "N/A")}
-                                </p>
-                              </div>
+                  <div className="timeline-container" style={{ maxHeight: "300px", overflowY: "auto" }}>
+                    {recentSessions.map((session: any, index: number) => {
+                      const d = parseSessionDate(session);
+                      return (
+                        <div key={index} className="timeline-item mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
+                          <div className="d-flex">
+                            <div className="timeline-marker me-3 mt-1">
+                              <div
+                                style={{
+                                  width: "8px",
+                                  height: "8px",
+                                  background: "var(--tutoring-orange)",
+                                  borderRadius: "50%",
+                                }}
+                              ></div>
+                            </div>
+                            <div className="flex-grow-1">
+                              <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
+                                Session
+                              </h6>
+                              <p className="mb-1 small">{formatMonthDayYear(d)}</p>
+                              <p className="mb-0 text-muted small">
+                                {(session?.Day || "N/A")} • {(session?.Time || "N/A")}
+                              </p>
                             </div>
                           </div>
-                        );
-                      }
-                    )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : selectedStudent ? (
-                  <div className="alert alert-info small">
-                    No recent sessions found for {selectedStudent}.
-                  </div>
+                  <div className="alert alert-info small">No recent sessions found for {selectedStudent}.</div>
                 ) : (
-                  <div className="alert alert-info small">
-                    Select a student to view recent sessions.
-                  </div>
+                  <div className="alert alert-info small">Select a student to view recent sessions.</div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Upcoming Sessions (cap 4) */}
           <div className="col-lg-6 mb-4">
             <div className="card">
               <div className="card-header">
                 <h6>
-                  <i
-                    className="fas fa-calendar-alt"
-                    style={{ marginRight: "8px" }}
-                  ></i>
+                  <i className="fas fa-calendar-alt" style={{ marginRight: "8px" }}></i>
                   Upcoming Sessions
                 </h6>
               </div>
               <div className="card-body">
                 <div style={{ maxHeight: "300px", overflowY: "auto" }}>
                   {selectedStudent && upcomingSessions.length > 0 ? (
-                    upcomingSessions.map(
-                      (session: any, index: number) => {
-                        const d = parseSessionDate(session);
-                        return (
-                          <div
-                            key={index}
-                            className="session-item mb-3 p-2"
-                            style={{
-                              background:
-                                "rgba(74, 122, 166, 0.05)",
-                              borderRadius: "6px",
-                              borderLeft:
-                                "3px solid var(--tutoring-orange)",
-                            }}
-                          >
-                            <div className="d-flex justify-content-between align-items-start">
-                              <div>
-                                <h6
-                                  className="mb-1"
-                                  style={{
-                                    color: "var(--tutoring-blue)",
-                                  }}
-                                >
-                                  Session
-                                </h6>
-                                <p className="mb-0 small text-muted">
-                                  {formatMonthDayYear(d)}
-                                </p>
-                              </div>
-                              <div className="text-end">
-                                <span
-                                  className="badge"
-                                  style={{
-                                    background:
-                                      "var(--tutoring-orange)",
-                                    color: "white",
-                                  }}
-                                >
-                                  {session?.Day || "N/A"}
-                                </span>
-                                <p className="mb-0 small text-muted">
-                                  {session?.Time || "N/A"}
-                                </p>
-                              </div>
+                    upcomingSessions.map((session: any, index: number) => {
+                      const d = parseSessionDate(session);
+                      return (
+                        <div
+                          key={index}
+                          className="session-item mb-3 p-2"
+                          style={{
+                            background: "rgba(74, 122, 166, 0.05)",
+                            borderRadius: "6px",
+                            borderLeft: "3px solid var(--tutoring-orange)",
+                          }}
+                        >
+                          <div className="d-flex justify-content-between align-items-start">
+                            <div>
+                              <h6 className="mb-1" style={{ color: "var(--tutoring-blue)" }}>
+                                Session
+                              </h6>
+                              <p className="mb-0 small text-muted">{formatMonthDayYear(d)}</p>
+                            </div>
+                            <div className="text-end">
+                              <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
+                                {session?.Day || "N/A"}
+                              </span>
+                              <p className="mb-0 small text-muted">{session?.Time || "N/A"}</p>
                             </div>
                           </div>
-                        );
-                      }
-                    )
+                        </div>
+                      );
+                    })
                   ) : selectedStudent ? (
-                    <div className="alert alert-info small">
-                      No upcoming sessions found for {selectedStudent}.
-                    </div>
+                    <div className="alert alert-info small">No upcoming sessions found for {selectedStudent}.</div>
                   ) : (
-                    <div className="alert alert-info small">
-                      Select a student to view upcoming sessions.
-                    </div>
+                    <div className="alert alert-info small">Select a student to view upcoming sessions.</div>
                   )}
                 </div>
               </div>
@@ -1666,7 +1429,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ===== Floating "Report a Bug" bubble (Home only) ===== */}
+      {/* Floating "Report a Bug" bubble (Home only) */}
       {activeTab === "home" && (
         <>
           <button
@@ -1740,8 +1503,7 @@ export default function Dashboard() {
                 </div>
                 <div className="card-body">
                   <p className="text-muted small">
-                    Found something that doesn&apos;t look right? Let us know
-                    what happened so we can fix it.
+                    Found something that doesn&apos;t look right? Let us know what happened so we can fix it.
                   </p>
 
                   <label className="form-label">
@@ -1757,14 +1519,10 @@ export default function Dashboard() {
                   />
 
                   {bugStatus === "success" && (
-                    <div className="alert alert-success py-2">
-                      Thank you! Your bug report has been submitted.
-                    </div>
+                    <div className="alert alert-success py-2">Thank you! Your bug report has been submitted.</div>
                   )}
                   {bugStatus === "error" && (
-                    <div className="alert alert-danger py-2">
-                      {bugErrorMsg || "Something went wrong sending your report."}
-                    </div>
+                    <div className="alert alert-danger py-2">{bugErrorMsg || "Something went wrong sending your report."}</div>
                   )}
 
                   <div className="d-flex justify-content-end gap-2 mt-2">
@@ -1782,19 +1540,10 @@ export default function Dashboard() {
                     >
                       Cancel
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={submitBugReport}
-                      disabled={bugSubmitting}
-                    >
+                    <button type="button" className="btn btn-primary btn-sm" onClick={submitBugReport} disabled={bugSubmitting}>
                       {bugSubmitting ? (
                         <>
-                          <span
-                            className="spinner-border spinner-border-sm me-2"
-                            role="status"
-                            aria-hidden="true"
-                          ></span>
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                           Sending…
                         </>
                       ) : (
