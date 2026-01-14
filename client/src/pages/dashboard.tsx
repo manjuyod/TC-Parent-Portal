@@ -70,6 +70,11 @@ type MasterScheduleResp = {
   rows: MasterScheduleRow[];
 };
 
+type CurrentSessionOption = {
+  value: string; // inserted into input
+  label: string; // subtext
+};
+
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -366,6 +371,56 @@ export default function Dashboard() {
     });
   }, [masterSchedule]);
 
+  /** ✅ FIX: define filteredCurrentSessionOptions */
+  const currentSessionOptions: CurrentSessionOption[] = useMemo(() => {
+    if (!selectedStudent) return [];
+
+    // Prefer master schedule
+    const fromMaster = (masterScheduleByDay || []).flatMap(({ day, ranges }) =>
+      ranges.map((range) => ({
+        value: `${day} ${range}`,
+        label: "",
+      }))
+    );
+
+    if (fromMaster.length) {
+      const seen = new Set<string>();
+      return fromMaster.filter((o) => {
+        const k = o.value.toLowerCase().trim();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
+
+    // Fallback: sessions
+    const fallback = (sessionsForSelected || [])
+      .map((s: any) => {
+        const day = String(s?.Day || "").trim();
+        const time = String(s?.Time || "").trim();
+        const val = [day, time].filter(Boolean).join(" ");
+        return { value: val, label: "From recent sessions" };
+      })
+      .filter((o) => !!o.value);
+
+    const seen2 = new Set<string>();
+    return fallback.filter((o) => {
+      const k = o.value.toLowerCase().trim();
+      if (seen2.has(k)) return false;
+      seen2.add(k);
+      return true;
+    });
+  }, [selectedStudent, masterScheduleByDay, sessionsForSelected]);
+
+  const filteredCurrentSessionOptions: CurrentSessionOption[] = useMemo(() => {
+    const q = String(reqCurrent || "").trim().toLowerCase();
+    const base = currentSessionOptions || [];
+    if (!q) return base.slice(0, 30);
+    return base
+      .filter((o) => o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [reqCurrent, currentSessionOptions]);
+
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -391,7 +446,7 @@ export default function Dashboard() {
       `Parent Portal Schedule Change Request`,
       ``,
       `Student: ${reqStudent || "(not selected)"}`,
-      `Current session: ${reqCurrent || "(not provided)"}`,
+      `Current Schedule: ${reqCurrent || "(not provided)"}`,
       `Requested new start: ${prettyDate} at ${prettyTime}`,
       ``,
       `Requested change:`,
@@ -616,9 +671,7 @@ export default function Dashboard() {
                   <div className="alert alert-info mb-0">No master schedule found for {selectedStudent}.</div>
                 ) : (
                   <>
-                    <div className="text-muted small mb-3">
-                      Times shown as 1-hour blocks.
-                    </div>
+                    <div className="text-muted small mb-3">Times shown as 1-hour blocks.</div>
 
                     <div className="row g-3">
                       {masterScheduleByDay.map(({ day, ranges }) => (
@@ -641,8 +694,6 @@ export default function Dashboard() {
                               <div className="fw-semibold" style={{ color: "var(--tutoring-blue)" }}>
                                 {day}
                               </div>
-
-                              {/* ✅ removed the count badge here */}
                             </div>
 
                             <div className="card-body">
@@ -662,9 +713,7 @@ export default function Dashboard() {
                                 ))}
                               </div>
 
-                              <div className="mt-3 small text-muted">
-                                
-                              </div>
+                              <div className="mt-3 small text-muted"></div>
                             </div>
                           </div>
                         </div>
@@ -709,10 +758,7 @@ export default function Dashboard() {
                         value={reqStudentId ?? ""}
                         onChange={(e) => {
                           const id = e.target.value ? Number(e.target.value) : null;
-                          setReqStudentId(id);
-                          const name = students.find((s: any) => s.id === id)?.name || "";
-                          setReqStudent(name);
-                          setSelectedStudent(name);
+                          setStudentById(id);
                         }}
                       >
                         <option value="">Select a student…</option>
@@ -728,7 +774,7 @@ export default function Dashboard() {
 
                   <div className="col-md-6">
                     <label htmlFor="current_session" className="form-label">
-                      Current Session <span className="text-danger">*</span>
+                      Current Scheduled Times <span className="text-danger">*</span>
                     </label>
                     <div className="input-group position-relative" style={{ zIndex: 10 }}>
                       <span className="input-group-text">
@@ -1332,7 +1378,11 @@ export default function Dashboard() {
             <div className="card">
               <div className="card-header">
                 <h6>
-                  <img src={scheduleIconPath} alt="Schedule Icon" style={{ width: "20px", height: "20px", marginRight: "8px" }} />
+                  <img
+                    src={scheduleIconPath}
+                    alt="Schedule Icon"
+                    style={{ width: "20px", height: "20px", marginRight: "8px" }}
+                  />
                   Recent Sessions (Last 30 Days)
                 </h6>
               </div>
