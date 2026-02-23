@@ -31,8 +31,8 @@ class TTLCache<K, V> {
   set(k: K, v: V) {
     this.map.set(k, { v, exp: Date.now() + this.ttlMs });
     if (this.map.size > this.max) {
-      const [first] = this.map.keys();
-      this.map.delete(first);
+      const firstEntry = this.map.keys().next();
+      if (!firstEntry.done) this.map.delete(firstEntry.value);
     }
   }
 }
@@ -280,21 +280,22 @@ export async function getHoursBalance(inquiryId: number | string) {
 
     try {
       const result = await request.execute("dpinkney_TC.dbo.USP_Report_AccountBalance");
+      const recordsets = Array.isArray(result.recordsets) ? result.recordsets : [];
 
       let balanceData: Record<string, any> = {};
       let extraData: any[] = [];
       let accountDetails: any[] = [];
       let remainingHours = 0.0;
 
-      if (result.recordsets && result.recordsets.length > 1) {
-        const balanceRow = result.recordsets[1]?.[0];
+      if (recordsets.length > 1) {
+        const balanceRow = recordsets[1]?.[0];
         balanceData = balanceRow ?? {};
 
-        if (result.recordsets.length > 2) {
-          extraData = result.recordsets[2] ?? [];
+        if (recordsets.length > 2) {
+          extraData = recordsets[2] ?? [];
         }
-        if (result.recordsets.length > 3) {
-          accountDetails = result.recordsets[3] ?? [];
+        if (recordsets.length > 3) {
+          accountDetails = recordsets[3] ?? [];
         }
 
         const toFloat = (v: any) => {

@@ -1,26 +1,15 @@
 // server/featureFlagsDb.ts
 import { pgPool } from "./pg";
+import {
+  type BillingColumnVisibility,
+  type UiPolicy,
+  DEFAULT_BILLING_COLUMN_VISIBILITY,
+} from "@shared/uiPolicy";
 
-export type BillingColumnVisibility = {
-  hideDate?: boolean;
-  hideStudent?: boolean;
-  hideEventType?: boolean;
-  hideAttendance?: boolean;
-  hideAdjustment?: boolean;
-};
-
-export type Policy = {
-  hideBilling?: boolean;
-  hideHours?: boolean;
-  billingColumnVisibility?: BillingColumnVisibility;
-};
+export type Policy = UiPolicy;
 
 const DEFAULT_COLS: Required<BillingColumnVisibility> = {
-  hideDate: false,
-  hideStudent: false,
-  hideEventType: false,
-  hideAttendance: false,
-  hideAdjustment: false,
+  ...DEFAULT_BILLING_COLUMN_VISIBILITY,
 };
 
 function normalizePolicy(p?: Policy): Required<Policy> {
