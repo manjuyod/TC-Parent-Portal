@@ -12,6 +12,14 @@ export const pgPool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
+/**
+ * Execute a SQL query against the configured Neon/Postgres connection pool and return the result.
+ *
+ * @param text - SQL query text (may include parameter placeholders)
+ * @param params - Optional array of parameter values for the query
+ * @returns The resulting `QueryResult<T>` containing rows typed as `T`
+ * @throws Error if the `NEON_URL` environment variable is missing or empty
+ */
 export async function pgQuery<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params: readonly unknown[] = []

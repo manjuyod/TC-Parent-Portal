@@ -270,7 +270,16 @@ export async function getSessions(studentId: number | string) {
   }
 }
 
-/* ------------------------ Billing (stored procedure) ------------------------ */
+/**
+ * Fetches account balance and related account information for a given inquiry.
+ *
+ * @param inquiryId - Inquiry identifier as a number or numeric string; will be coerced to an integer
+ * @returns An object with:
+ *  - `balance`: raw balance row (may contain fields like `Purchases`, `AttendancePresent`, `UnexcusedAbsences`, `MiscAdjustments`),
+ *  - `extra`: additional rows returned by the procedure (array),
+ *  - `account_details`: detailed account rows (array),
+ *  - `remaining_hours`: numeric sum derived from balance fields representing remaining hours
+ */
 export async function getHoursBalance(inquiryId: number | string) {
   try {
     const idNum = coerceInt(inquiryId);

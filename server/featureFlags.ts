@@ -12,6 +12,12 @@ const DEFAULT_COLS: Required<BillingColumnVisibility> = {
   ...DEFAULT_BILLING_COLUMN_VISIBILITY,
 };
 
+/**
+ * Normalize a possibly partial Policy into a complete policy object with defaults applied.
+ *
+ * @param p - Optional partial Policy to normalize
+ * @returns A policy where `hideBilling` and `hideHours` are booleans and `billingColumnVisibility` is merged with the default column visibility
+ */
 function normalizePolicy(p?: Policy): Required<Policy> {
   return {
     hideBilling: !!p?.hideBilling,

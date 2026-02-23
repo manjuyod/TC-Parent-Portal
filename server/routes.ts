@@ -47,6 +47,12 @@ const DEFAULT_COLS: Required<BillingColumnVisibility> = {
   ...DEFAULT_BILLING_COLUMN_VISIBILITY,
 };
 
+/**
+ * Produce a complete Flags object by filling missing values with defaults.
+ *
+ * @param f - Optional partial Flags to normalize; undefined or missing fields are replaced with defaults
+ * @returns An object containing `hideBilling` and `hideHours` as booleans and `billingColumnVisibility` merged with `DEFAULT_COLS`
+ */
 function normalizeFlags(f?: Flags): Required<Flags> {
   return {
     hideBilling: !!f?.hideBilling,
@@ -55,12 +61,26 @@ function normalizeFlags(f?: Flags): Required<Flags> {
   };
 }
 
+/**
+ * Format a Date as a local date-only string in YYYY-MM-DD format.
+ *
+ * The year, month, and day are taken from the Date using local time (not UTC).
+ *
+ * @param date - The Date to format
+ * @returns The date formatted as `YYYY-MM-DD`
+ */
 function formatLocalDateOnly(date: Date): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${mm}-${dd}`;
 }
 
+/**
+ * Parses a string in YYYY-MM-DD format into a local Date representing that calendar day.
+ *
+ * @param value - The value to parse; must be a string formatted as `YYYY-MM-DD`.
+ * @returns A Date set to the parsed year/month/day in the local time zone, or `null` if the input is not a valid `YYYY-MM-DD` date.
+ */
 function parseLocalDateOnly(value: unknown): Date | null {
   if (typeof value !== "string") return null;
   const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -81,6 +101,12 @@ function parseLocalDateOnly(value: unknown): Date | null {
   return parsed;
 }
 
+/**
+ * Convert a value to a date-only ISO string in `YYYY-MM-DD` form.
+ *
+ * @param value - A Date, date-like string, number, or other value to be interpreted as a date. Null/undefined and invalid dates produce `null`.
+ * @returns A `YYYY-MM-DD` formatted string when `value` represents a valid date, `null` otherwise.
+ */
 function toDateOnlyISO(value: unknown): string | null {
   if (value instanceof Date) {
     return isNaN(value.getTime()) ? null : formatLocalDateOnly(value);
@@ -264,7 +290,12 @@ async function resolveCenterEmailForStudent(studentId: number): Promise<string |
 
 /* ------------------------------------------------------------------ */
 /* Route registration                                                  */
-/* ------------------------------------------------------------------ */
+/**
+ * Registers all HTTP routes and middleware on the given Express app and returns a configured HTTP server.
+ *
+ * @param app - The Express application to attach routes, session middleware, and handlers to
+ * @returns An HTTP Server instance created from the configured Express app
+ */
 export async function registerRoutes(app: Express): Promise<Server> {
   // Sessions
   app.use(

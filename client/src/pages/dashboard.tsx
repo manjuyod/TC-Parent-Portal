@@ -127,12 +127,26 @@ type SessionOption = {
   label: string;
 };
 
+/**
+ * Formats a Date as a calendar date string in `YYYY-MM-DD` using the local timezone.
+ *
+ * @param date - The Date to format (interpreted in the local timezone)
+ * @returns The date formatted as `YYYY-MM-DD`
+ */
 function formatLocalDateOnly(date: Date): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${mm}-${dd}`;
 }
 
+/**
+ * Parse an ISO-like string or Date into a Date representing the local date (time cleared), or return `null` when input is absent or invalid.
+ *
+ * Accepts a Date or a string (commonly an ISO date like `YYYY-MM-DD` or a full ISO datetime). The returned Date's time components are set to the local midnight for the parsed calendar day.
+ *
+ * @param isoOrAny - A Date, an ISO-like date string, or `null`/`undefined`.
+ * @returns A Date set to the parsed local calendar date (time cleared) or `null` if the input is missing or cannot be parsed as a valid date.
+ */
 function parseDateOnlyValue(isoOrAny: string | Date | null | undefined): Date | null {
   if (!isoOrAny) return null;
 
@@ -167,6 +181,13 @@ function parseDateOnlyValue(isoOrAny: string | Date | null | undefined): Date | 
     : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
+/**
+ * Render the Tutoring Club parent portal dashboard, managing student selection, schedule and billing views, master schedule, session lists, and in-app bug reporting.
+ *
+ * Renders the Home, Schedule, and (conditionally visible) Billing tabs; handles data fetching, local UI state for schedule-change requests and bug reports, master schedule grouping, recent/upcoming session lists, and account/billing displays driven by server-provided UI policy.
+ *
+ * @returns The React element for the parent portal dashboard UI, including tabs for Home, Schedule, and Billing (Billing may be hidden by policy). 
+ */
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
