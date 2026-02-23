@@ -163,9 +163,11 @@ export class MemStorage implements IStorage {
 
   async createParent(insertParent: InsertParent): Promise<Parent> {
     const id = randomUUID();
-    const parent: Parent = { 
-      ...insertParent, 
+    const parent: Parent = {
       id,
+      contactPhone: insertParent.contactPhone,
+      name: insertParent.name,
+      email: insertParent.email ?? null,
       createdAt: new Date(),
     };
     this.parents.set(id, parent);
@@ -182,7 +184,15 @@ export class MemStorage implements IStorage {
 
   async createStudent(insertStudent: InsertStudent): Promise<Student> {
     const id = randomUUID();
-    const student: Student = { ...insertStudent, id };
+    const student: Student = {
+      id,
+      parentId: insertStudent.parentId,
+      name: insertStudent.name,
+      grade: insertStudent.grade ?? null,
+      subject: insertStudent.subject ?? null,
+      status: insertStudent.status ?? "active",
+      progress: insertStudent.progress ?? 0,
+    };
     this.students.set(id, student);
     return student;
   }
@@ -195,9 +205,14 @@ export class MemStorage implements IStorage {
 
   async createSession(insertSession: InsertSession): Promise<Session> {
     const id = randomUUID();
-    const session: Session = { 
-      ...insertSession, 
+    const session: Session = {
       id,
+      studentId: insertSession.studentId,
+      dayOfWeek: insertSession.dayOfWeek,
+      startTime: insertSession.startTime,
+      endTime: insertSession.endTime,
+      subject: insertSession.subject,
+      status: insertSession.status ?? "confirmed",
       createdAt: new Date(),
     };
     this.sessions.set(id, session);
@@ -206,9 +221,14 @@ export class MemStorage implements IStorage {
 
   async createScheduleChangeRequest(insertRequest: InsertScheduleChangeRequest): Promise<ScheduleChangeRequest> {
     const id = randomUUID();
-    const request: ScheduleChangeRequest = { 
-      ...insertRequest, 
+    const request: ScheduleChangeRequest = {
       id,
+      studentId: insertRequest.studentId,
+      currentSession: insertRequest.currentSession,
+      preferredDate: insertRequest.preferredDate,
+      preferredTime: insertRequest.preferredTime,
+      requestedChange: insertRequest.requestedChange,
+      reason: insertRequest.reason ?? null,
       status: "pending",
       createdAt: new Date(),
     };
@@ -230,7 +250,14 @@ export class MemStorage implements IStorage {
 
   async createBillingInfo(insertBillingInfo: InsertBillingInfo): Promise<BillingInfo> {
     const id = randomUUID();
-    const billingInfo: BillingInfo = { ...insertBillingInfo, id };
+    const billingInfo: BillingInfo = {
+      id,
+      parentId: insertBillingInfo.parentId,
+      currentBalance: insertBillingInfo.currentBalance ?? "0.00",
+      monthlyRate: insertBillingInfo.monthlyRate,
+      nextPaymentDate: insertBillingInfo.nextPaymentDate ?? null,
+      paymentMethod: insertBillingInfo.paymentMethod ?? null,
+    };
     this.billingInfos.set(id, billingInfo);
     return billingInfo;
   }
@@ -243,9 +270,13 @@ export class MemStorage implements IStorage {
 
   async createTransaction(insertTransaction: InsertTransaction): Promise<Transaction> {
     const id = randomUUID();
-    const transaction: Transaction = { 
-      ...insertTransaction, 
+    const transaction: Transaction = {
       id,
+      parentId: insertTransaction.parentId,
+      date: insertTransaction.date,
+      description: insertTransaction.description,
+      amount: insertTransaction.amount,
+      status: insertTransaction.status ?? "paid",
       createdAt: new Date(),
     };
     this.transactions.set(id, transaction);
