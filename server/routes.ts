@@ -14,6 +14,11 @@ import {
 
 import { getPool, sql } from "./db"; // MSSQL connection (for tutoring club data)
 import { pgQuery } from "./pg"; // Neon/Postgres query helper (for flags + bug reports)
+import {
+  type BillingColumnVisibility,
+  type UiPolicy,
+  DEFAULT_BILLING_COLUMN_VISIBILITY,
+} from "@shared/uiPolicy";
 
 /* ------------------------------------------------------------------ */
 /* Session typing                                                     */
@@ -36,26 +41,10 @@ declare module "express-session" {
 /* ------------------------------------------------------------------ */
 /* Feature flags types                                                 */
 /* ------------------------------------------------------------------ */
-type BillingColumnVisibility = {
-  hideDate?: boolean;
-  hideStudent?: boolean;
-  hideEventType?: boolean;
-  hideAttendance?: boolean;
-  hideAdjustment?: boolean;
-};
-
-type Flags = {
-  hideBilling?: boolean;
-  hideHours?: boolean;
-  billingColumnVisibility?: BillingColumnVisibility;
-};
+type Flags = UiPolicy;
 
 const DEFAULT_COLS: Required<BillingColumnVisibility> = {
-  hideDate: false,
-  hideStudent: false,
-  hideEventType: false,
-  hideAttendance: false,
-  hideAdjustment: false,
+  ...DEFAULT_BILLING_COLUMN_VISIBILITY,
 };
 
 function normalizeFlags(f?: Flags): Required<Flags> {
@@ -64,6 +53,51 @@ function normalizeFlags(f?: Flags): Required<Flags> {
     hideHours: !!f?.hideHours,
     billingColumnVisibility: { ...DEFAULT_COLS, ...(f?.billingColumnVisibility ?? {}) },
   };
+}
+
+function formatLocalDateOnly(date: Date): string {
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${mm}-${dd}`;
+}
+
+function parseLocalDateOnly(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(year, month - 1, day);
+
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function toDateOnlyISO(value: unknown): string | null {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : formatLocalDateOnly(value);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const fromHead = parseLocalDateOnly(trimmed.slice(0, 10));
+    if (fromHead) return formatLocalDateOnly(fromHead);
+
+    const parsed = new Date(trimmed);
+    return isNaN(parsed.getTime()) ? null : formatLocalDateOnly(parsed);
+  }
+
+  if (value == null) return null;
+  const parsed = new Date(String(value));
+  return isNaN(parsed.getTime()) ? null : formatLocalDateOnly(parsed);
 }
 
 /** All policy_key values we store in franchise_policies */
@@ -401,22 +435,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return (a.TimeID ?? 0) - (b.TimeID ?? 0);
       });
 
-      // Normalize to ISO for client
+      // Keep date-only semantics stable for the client (YYYY-MM-DD).
       const sessionsOut = allSessions
         .map((s) => {
-          let iso: string | null = null;
-          if (s?.ScheduleDate instanceof Date) {
-            iso = !isNaN(s.ScheduleDate.getTime()) ? s.ScheduleDate.toISOString() : null;
-          } else {
-            const d = new Date(String(s?.ScheduleDate));
-            iso = !isNaN(d.getTime()) ? d.toISOString() : null;
-          }
+          const iso = toDateOnlyISO(s?.ScheduleDateISO ?? s?.ScheduleDate);
+          if (!iso) return null;
           return { ...s, ScheduleDateISO: iso };
         })
-        .filter((s) => s.ScheduleDateISO !== null);
+        .filter((s): s is any => s !== null);
 
       // Next upcoming per student
       const now = new Date();
+      const todayDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const byStudent = new Map<number, any[]>();
       for (const s of sessionsOut) {
         const k = Number(s.studentId);
@@ -427,12 +457,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const students = studentsInfo.map((student: any) => {
         const sid = Number(student.ID);
         const list = byStudent.get(sid) || [];
-        const nextUpcoming = list.find((s) => new Date(s.ScheduleDateISO) >= now);
+        const nextUpcoming = list.find((s) => {
+          const sessionDate = parseLocalDateOnly(String(s?.ScheduleDateISO ?? ""));
+          return sessionDate !== null && sessionDate >= todayDateOnly;
+        });
+        const nextUpcomingDate =
+          nextUpcoming && nextUpcoming.ScheduleDateISO
+            ? parseLocalDateOnly(String(nextUpcoming.ScheduleDateISO))
+            : null;
+        const nextUpcomingDay =
+          nextUpcoming?.Day ??
+          (nextUpcomingDate
+            ? nextUpcomingDate.toLocaleDateString("en-US", { weekday: "long" })
+            : null);
         const nextSession = nextUpcoming
-          ? `${
-              nextUpcoming.Day ??
-              new Date(nextUpcoming.ScheduleDateISO).toLocaleDateString("en-US", { weekday: "long" })
-            } ${nextUpcoming.Time ?? ""}`.trim() || "Scheduled"
+          ? `${nextUpcomingDay ?? ""} ${nextUpcoming.Time ?? ""}`.trim() || "Scheduled"
           : "No sessions scheduled";
 
         return {
@@ -557,10 +596,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const monday = new Date(todayDateOnly);
       monday.setDate(todayDateOnly.getDate() - diffToMonday);
 
-      const fromDate = monday.toISOString().slice(0, 10);
+      const fromDate = formatLocalDateOnly(monday);
       const tomorrow = new Date(todayDateOnly);
       tomorrow.setDate(todayDateOnly.getDate() + 1);
-      const toDate = tomorrow.toISOString().slice(0, 10);
+      const toDate = formatLocalDateOnly(tomorrow);
 
       const { rows, total } = await getStudentReviews(sid, {
         fromDate,

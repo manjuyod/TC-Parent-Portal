@@ -16,7 +16,7 @@ const strip = (v?: string | null) =>
 const asBool = (v?: string, def = false) =>
   v == null || v === '' ? def : /^(1|true|yes|on)$/i.test(v.trim());
 
-const asInt = (v?: string, def: number) => {
+const asInt = (v: string | undefined, def: number) => {
   const n = v ? parseInt(v, 10) : NaN;
   return Number.isFinite(n) ? n : def;
 };

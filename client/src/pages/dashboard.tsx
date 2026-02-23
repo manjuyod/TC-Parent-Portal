@@ -2,23 +2,16 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
+import {
+  type BillingColumnVisibility,
+  type UiPolicy,
+  DEFAULT_BILLING_COLUMN_VISIBILITY,
+} from "@shared/uiPolicy";
 
 type Tab = "home" | "schedule" | "billing";
 
-type BillingColumnVisibility = {
-  hideDate?: boolean;
-  hideStudent?: boolean;
-  hideEventType?: boolean;
-  hideAttendance?: boolean;
-  hideAdjustment?: boolean;
-};
-
 const DEFAULT_COLS: Required<BillingColumnVisibility> = {
-  hideDate: false,
-  hideStudent: false,
-  hideEventType: false,
-  hideAttendance: false,
-  hideAdjustment: false,
+  ...DEFAULT_BILLING_COLUMN_VISIBILITY,
 };
 
 /* Safer JSON fetch (catches accidental HTML from SPA fallbacks) */
@@ -70,6 +63,110 @@ type MasterScheduleResp = {
   rows: MasterScheduleRow[];
 };
 
+type DashboardStudent = {
+  id: number;
+  name: string;
+  grade: string | null;
+  subject: string | null;
+  status: string | null;
+  progress: number | null;
+  nextSession?: string;
+  franchiseId?: number | null;
+  centerEmail?: string | null;
+};
+
+type DashboardSession = {
+  studentId: number;
+  studentName: string;
+  ScheduleDate?: string | Date | null;
+  ScheduleDateISO?: string | null;
+  Day?: string | null;
+  TimeID?: number | null;
+  Time?: string | null;
+};
+
+type BillingAccountRow = {
+  Date?: string | Date | null;
+  TransactionDate?: string | Date | null;
+  PostedDate?: string | Date | null;
+  FormattedDate?: string | Date | null;
+  Attendance?: string | null;
+  EventType?: string | null;
+  Adjustment?: string | number | null;
+  StudentName?: string | null;
+  Description?: string | null;
+  [key: string]: unknown;
+};
+
+type DashboardBilling = {
+  account_details?: BillingAccountRow[];
+  remaining_hours?: number | null;
+  [key: string]: unknown;
+};
+
+type AuthMeResponse = {
+  parent: {
+    id: number | string;
+    name: string;
+    contactPhone: string | null;
+    email?: string | null;
+  };
+  students: DashboardStudent[];
+};
+
+type DashboardResponse = {
+  students: DashboardStudent[];
+  sessions: DashboardSession[];
+  billing: DashboardBilling | null;
+  transactions: unknown[];
+  uiPolicy: UiPolicy;
+};
+
+type SessionOption = {
+  value: string;
+  label: string;
+};
+
+function formatLocalDateOnly(date: Date): string {
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${mm}-${dd}`;
+}
+
+function parseDateOnlyValue(isoOrAny: string | Date | null | undefined): Date | null {
+  if (!isoOrAny) return null;
+
+  if (isoOrAny instanceof Date) {
+    return isNaN(isoOrAny.getTime())
+      ? null
+      : new Date(isoOrAny.getFullYear(), isoOrAny.getMonth(), isoOrAny.getDate());
+  }
+
+  const raw = String(isoOrAny).trim();
+  if (!raw) return null;
+
+  const dateHead = raw.slice(0, 10);
+  const match = dateHead.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return parsed;
+    }
+  }
+
+  const parsed = new Date(raw);
+  return isNaN(parsed.getTime())
+    ? null
+    : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
 export default function Dashboard() {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("home");
@@ -92,8 +189,8 @@ export default function Dashboard() {
   const [bugStatus, setBugStatus] = useState<null | "success" | "error">(null);
   const [bugErrorMsg, setBugErrorMsg] = useState<string | null>(null);
 
-  const { data: user } = useQuery({ queryKey: ["/api/auth/me"] });
-  const { data: dashboardData } = useQuery({
+  const { data: user } = useQuery<AuthMeResponse>({ queryKey: ["/api/auth/me"] });
+  const { data: dashboardData } = useQuery<DashboardResponse>({
     queryKey: ["/api/dashboard"],
     enabled: !!user,
   });
@@ -101,7 +198,7 @@ export default function Dashboard() {
   const hideBilling = !!dashboardData?.uiPolicy?.hideBilling;
   const hideHours = !!dashboardData?.uiPolicy?.hideHours;
 
-  const todayDateStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayDateStr = useMemo(() => formatLocalDateOnly(new Date()), []);
   const nowLocalHHMM = useMemo(() => {
     const n = new Date();
     const hh = String(n.getHours()).padStart(2, "0");
@@ -120,23 +217,8 @@ export default function Dashboard() {
   }, [activeTab, hideBilling]);
 
   // ===== Helpers =====
-  const parseDateOnly = (isoOrAny: string | Date | null | undefined): Date | null => {
-    if (!isoOrAny) return null;
-    if (typeof isoOrAny === "string") {
-      const d = new Date(isoOrAny);
-      if (!isNaN(d.getTime())) {
-        return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-      }
-      const iso = isoOrAny.length >= 10 ? isoOrAny.slice(0, 10) : isoOrAny;
-      const d2 = new Date(`${iso}T00:00:00`);
-      return isNaN(d2.getTime()) ? null : d2;
-    }
-    if (isoOrAny instanceof Date) {
-      return new Date(isoOrAny.getFullYear(), isoOrAny.getMonth(), isoOrAny.getDate());
-    }
-    const d3 = new Date(String(isoOrAny));
-    return isNaN(d3.getTime()) ? null : new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
-  };
+  const parseDateOnly = (isoOrAny: string | Date | null | undefined): Date | null =>
+    parseDateOnlyValue(isoOrAny);
 
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -203,40 +285,71 @@ export default function Dashboard() {
     sunday: 7,
   };
 
-  const students: any[] = dashboardData?.students ?? [];
-  const sessions: any[] = dashboardData?.sessions ?? [];
+  const students = dashboardData?.students ?? [];
+  const sessions = dashboardData?.sessions ?? [];
   const billing = dashboardData?.billing;
 
   const setStudentById = (id: number | null) => {
     setReqStudentId(id);
-    const name = students.find((s: any) => s.id === id)?.name || "";
+    const name = students.find((s) => s.id === id)?.name || "";
     setReqStudent(name);
     setSelectedStudent(name);
   };
 
   const setStudentByName = (name: string) => {
     setSelectedStudent(name);
-    const id = students.find((s: any) => s.name === name)?.id ?? null;
+    const id = students.find((s) => s.name === name)?.id ?? null;
     setReqStudentId(id);
     setReqStudent(name);
   };
 
-  const parseSessionDate = (s: any): Date | null => {
-    const iso: string | undefined = s?.ScheduleDateISO;
+  const parseSessionDate = (s: DashboardSession): Date | null => {
+    const iso = s?.ScheduleDateISO;
     if (iso) return parseDateOnly(iso);
     return parseDateOnly(s?.ScheduleDate);
   };
 
-  const sessionSortKey = (s: any): number => {
+  const sessionSortKey = (s: DashboardSession): number => {
     const d = parseSessionDate(s)?.getTime() ?? 0;
     const tid = Number.isFinite(Number(s?.TimeID)) ? Number(s.TimeID) : 0;
     return d * 1000 + tid;
   };
 
-  const sessionsForSelected: any[] = useMemo(() => {
+  const sessionsForSelected = useMemo<DashboardSession[]>(() => {
     if (!selectedStudent || !sessions.length) return [];
-    return sessions.filter((s: any) => s.studentName === selectedStudent);
+    return sessions.filter((s) => s.studentName === selectedStudent);
   }, [selectedStudent, sessions]);
+
+  const currentSessionOptions = useMemo<SessionOption[]>(() => {
+    const seen = new Set<string>();
+    const options: SessionOption[] = [];
+
+    for (const session of sessionsForSelected) {
+      const date = parseSessionDate(session);
+      const dayLabel =
+        date?.toLocaleDateString("en-US", { weekday: "long" }) ??
+        session.Day ??
+        "Session";
+      const timeLabel = session.Time ?? "N/A";
+      const value = `${dayLabel} ${timeLabel}`.trim();
+      const label = date ? `${formatMonthDayYear(date)} • ${value}` : value;
+      const key = `${value}|${label}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        options.push({ value, label });
+      }
+    }
+
+    return options;
+  }, [sessionsForSelected]);
+
+  const filteredCurrentSessionOptions = useMemo(() => {
+    const query = reqCurrent.trim().toLowerCase();
+    if (!query) return currentSessionOptions;
+    return currentSessionOptions.filter((option) =>
+      `${option.value} ${option.label}`.toLowerCase().includes(query)
+    );
+  }, [currentSessionOptions, reqCurrent]);
 
   const recentSessions = useMemo(() => {
     const now = new Date();
@@ -264,14 +377,14 @@ export default function Dashboard() {
   }, [sessionsForSelected]);
 
   // ================== BILLING rows: 30 most current sessions (except today) ==================
-  const billingRows: any[] = billing?.account_details ?? [];
+  const billingRows: BillingAccountRow[] = billing?.account_details ?? [];
 
-  const getRowDate = (row: any): Date | null => {
+  const getRowDate = (row: BillingAccountRow): Date | null => {
     const raw = row?.Date ?? row?.TransactionDate ?? row?.PostedDate ?? row?.FormattedDate ?? null;
     return parseDateOnly(raw);
   };
 
-  const isSessionRow = (row: any) => {
+  const isSessionRow = (row: BillingAccountRow) => {
     const att = String(row?.Attendance ?? "").trim();
     const evt = String(row?.EventType ?? "").toLowerCase();
     return !!att || evt.includes("attendance");
@@ -301,7 +414,7 @@ export default function Dashboard() {
   // ------------------- Reviews fetch (Today + This Week) -------------------
   const selectedStudentId: number | null = useMemo(() => {
     if (!selectedStudent) return null;
-    const s = students.find((x: any) => x.name === selectedStudent);
+    const s = students.find((x) => x.name === selectedStudent);
     return s ? Number(s.id) : null;
   }, [selectedStudent, students]);
 
@@ -309,7 +422,7 @@ export default function Dashboard() {
     data: weeklyReviews,
     isLoading: reviewsLoading,
     error: reviewsError,
-  } = useQuery<WeeklyReviewsResp>({
+  } = useQuery<WeeklyReviewsResp, Error>({
     queryKey: ["/api/students", selectedStudentId, "reviews", "week"],
     enabled: selectedStudentId != null,
     queryFn: () => getJSON<WeeklyReviewsResp>(`/api/students/${selectedStudentId}/reviews/week`),
@@ -320,7 +433,7 @@ export default function Dashboard() {
     data: masterSchedule,
     isLoading: masterScheduleLoading,
     error: masterScheduleError,
-  } = useQuery<MasterScheduleResp>({
+  } = useQuery<MasterScheduleResp, Error>({
     queryKey: ["/api/students", selectedStudentId, "master-schedule"],
     enabled: selectedStudentId != null,
     queryFn: () => getJSON<MasterScheduleResp>(`/api/students/${selectedStudentId}/master-schedule`),
@@ -411,12 +524,12 @@ export default function Dashboard() {
 
   async function resolveCenterEmail(): Promise<string> {
     if (reqStudentId != null) {
-      const s = students.find((x: any) => x.id === reqStudentId);
+      const s = students.find((x) => x.id === reqStudentId);
       if (s?.centerEmail) return String(s.centerEmail);
       try {
         const r = await fetch(`/api/center-email?studentId=${reqStudentId}`);
         if (r.ok) {
-          const d = await r.json();
+          const d = (await r.json()) as { centerEmail?: string | null };
           if (d?.centerEmail) return d.centerEmail;
         }
       } catch {}
@@ -486,9 +599,9 @@ export default function Dashboard() {
         message: bugText.trim(),
         page: "dashboard-home",
         user: {
-          name: (user as any)?.parent?.name ?? null,
-          email: (user as any)?.parent?.email ?? null,
-          students: students.map((s: any) => s.name),
+          name: user?.parent?.name ?? null,
+          email: user?.parent?.email ?? null,
+          students: students.map((s) => s.name),
         },
       };
 
@@ -549,7 +662,7 @@ export default function Dashboard() {
                   <strong>Welcome, {user.parent.name}!</strong>
                 </div>
                 <div className="text-muted small mb-2">
-                  Students: {students.map((s: any) => s.name).join(", ")}
+                  Students: {students.map((s) => s.name).join(", ")}
                 </div>
                 <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                   Logout
@@ -610,7 +723,7 @@ export default function Dashboard() {
                   <div className="text-muted">Loading master schedule…</div>
                 ) : masterScheduleError ? (
                   <div className="alert alert-danger">
-                    {(masterScheduleError as any)?.message || "Failed to load master schedule"}
+                    {masterScheduleError?.message || "Failed to load master schedule"}
                   </div>
                 ) : (masterScheduleByDay?.length ?? 0) === 0 ? (
                   <div className="alert alert-info mb-0">No master schedule found for {selectedStudent}.</div>
@@ -710,13 +823,13 @@ export default function Dashboard() {
                         onChange={(e) => {
                           const id = e.target.value ? Number(e.target.value) : null;
                           setReqStudentId(id);
-                          const name = students.find((s: any) => s.id === id)?.name || "";
+                          const name = students.find((s) => s.id === id)?.name || "";
                           setReqStudent(name);
                           setSelectedStudent(name);
                         }}
                       >
                         <option value="">Select a student…</option>
-                        {students.map((student: any) => (
+                        {students.map((student) => (
                           <option key={student.id} value={student.id}>
                             {student.name}
                           </option>
@@ -951,7 +1064,7 @@ export default function Dashboard() {
                   <strong>Welcome, {user.parent.name}!</strong>
                 </div>
                 <div className="text-muted small mb-2">
-                  Students: {students.map((s: any) => s.name).join(", ")}
+                  Students: {students.map((s) => s.name).join(", ")}
                 </div>
                 <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                   Logout
@@ -1014,7 +1127,7 @@ export default function Dashboard() {
                 </div>
                 <div className="text-end">
                   <div className="text-muted small mb-1">Students</div>
-                  <div className="fw-semibold">{students.map((s: any) => s.name).join(", ")}</div>
+                  <div className="fw-semibold">{students.map((s) => s.name).join(", ")}</div>
                 </div>
               </div>
             </div>
@@ -1114,7 +1227,7 @@ export default function Dashboard() {
                 <strong>Welcome, {user.parent.name}!</strong>
               </div>
               <div className="text-muted small mb-2">
-                Students: {students.map((s: any) => s.name).join(", ")}
+                Students: {students.map((s) => s.name).join(", ")}
               </div>
               <button onClick={handleLogout} className="btn btn-outline-primary btn-sm">
                 Logout
@@ -1175,26 +1288,19 @@ export default function Dashboard() {
               ) : reviewsLoading ? (
                 <div className="text-muted">Loading reviews…</div>
               ) : reviewsError ? (
-                <div className="alert alert-danger">{(reviewsError as any)?.message || "Failed to load reviews"}</div>
+                <div className="alert alert-danger">{reviewsError?.message || "Failed to load reviews"}</div>
               ) : (weeklyReviews?.rows?.length ?? 0) === 0 ? (
                 <div className="alert alert-secondary">No reviews for today or this week.</div>
               ) : (
                 <div style={{ maxHeight: 420, overflowY: "auto" }}>
                   {(() => {
                     const rows = weeklyReviews!.rows;
-                    const todayISO = new Date().toISOString().slice(0, 10);
+                    const todayISO = formatLocalDateOnly(new Date());
 
                     const todayRows = rows.filter((r) => r.SessionDateISO === todayISO);
                     const weekRows = rows.filter((r) => r.SessionDateISO !== todayISO);
 
-                    const formatDate = (iso: string) => {
-                      const d = new Date(iso + "T00:00:00");
-                      return d.toLocaleDateString("en-US", {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      });
-                    };
+                    const formatDate = (iso: string) => formatMonthDayYear(parseDateOnly(iso));
 
                     const Item = ({ r }: { r: ReviewRow }) => (
                       <div className="mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
@@ -1283,7 +1389,7 @@ export default function Dashboard() {
                     }}
                   >
                     <option value="">Select a student</option>
-                    {students.map((student: any) => (
+                    {students.map((student) => (
                       <option key={student.id} value={student.name}>
                         {student.name}
                       </option>
@@ -1341,6 +1447,9 @@ export default function Dashboard() {
                   <div className="timeline-container" style={{ maxHeight: "300px", overflowY: "auto" }}>
                     {recentSessions.map((session: any, index: number) => {
                       const d = parseSessionDate(session);
+                      const dayLabel = d
+                        ? d.toLocaleDateString("en-US", { weekday: "long" })
+                        : (session?.Day || "N/A");
                       return (
                         <div key={index} className="timeline-item mb-3 pb-3" style={{ borderBottom: "1px solid #eee" }}>
                           <div className="d-flex">
@@ -1360,7 +1469,7 @@ export default function Dashboard() {
                               </h6>
                               <p className="mb-1 small">{formatMonthDayYear(d)}</p>
                               <p className="mb-0 text-muted small">
-                                {(session?.Day || "N/A")} • {(session?.Time || "N/A")}
+                                {dayLabel} • {(session?.Time || "N/A")}
                               </p>
                             </div>
                           </div>
@@ -1390,6 +1499,9 @@ export default function Dashboard() {
                   {selectedStudent && upcomingSessions.length > 0 ? (
                     upcomingSessions.map((session: any, index: number) => {
                       const d = parseSessionDate(session);
+                      const dayLabel = d
+                        ? d.toLocaleDateString("en-US", { weekday: "long" })
+                        : (session?.Day || "N/A");
                       return (
                         <div
                           key={index}
@@ -1409,7 +1521,7 @@ export default function Dashboard() {
                             </div>
                             <div className="text-end">
                               <span className="badge" style={{ background: "var(--tutoring-orange)", color: "white" }}>
-                                {session?.Day || "N/A"}
+                                {dayLabel}
                               </span>
                               <p className="mb-0 small text-muted">{session?.Time || "N/A"}</p>
                             </div>
