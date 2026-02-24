@@ -458,10 +458,13 @@ export async function submitScheduleChangeRequest(requestData: {
   }
 }
 
-/* ------------------------ Admin login (DB-backed) ------------------------ */
+/* --------------------- Admin login helper (legacy/unused) --------------------- */
 /**
- * Verifies admin by email + password against SQL Server (dbo.tblUsers).
- * Then resolves franchise by matching that email to dbo.tblFranchies.FranchiesEmail.
+ * Legacy helper kept for reference. Current runtime admin login logic lives in
+ * server/adminAuth.ts and authenticates against tblUsers.UserName.
+ *
+ * This helper verifies by email + password and resolves franchise by matching
+ * email to dbo.tblFranchies.FranchiesEmail.
  *
  * Returns { franchiseId, email } on success, or null on failure.
  */

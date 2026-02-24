@@ -6,14 +6,14 @@ import { apiRequest } from "@/lib/queryClient";
 import logoPath from "@assets/logo_1755332058201.webp";
 
 export default function LoginAdmin() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [, navigate] = useLocation();
   const [error, setError] = useState("");
   const queryClient = useQueryClient();
 
   const loginMutation = useMutation({
-    mutationFn: async (data: { email: string; password: string }) => {
+    mutationFn: async (data: { username: string; password: string }) => {
       // 1) Log in (sets cookie)
       const res = await apiRequest("POST", "/api/admin/login", data);
 
@@ -49,7 +49,7 @@ export default function LoginAdmin() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    loginMutation.mutate({ email, password });
+    loginMutation.mutate({ username, password });
   };
 
   return (
@@ -64,19 +64,19 @@ export default function LoginAdmin() {
           {error && <div className="alert alert-danger">{error}</div>}
 
           <div className="info-text">
-            Sign in with your franchise admin email and password.
+            Sign in with your franchise admin username and password.
           </div>
 
           <form onSubmit={handleSubmit} autoComplete="on">
             <div className="mb-3">
-              <label htmlFor="admin_email" className="form-label">Admin Email</label>
+              <label htmlFor="admin_username" className="form-label">Admin Username</label>
               <input
-                type="email"
+                type="text"
                 className="form-control"
-                id="admin_email"
-                placeholder="owner@yourcenter.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="admin_username"
+                placeholder="your.username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
                 autoCapitalize="none"
                 autoCorrect="off"
