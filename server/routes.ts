@@ -11,6 +11,7 @@ import {
   getStudentReviews,
   getMasterScheduleByStudentId, 
 } from "./sqlServerStorage";
+import { authenticateAdminByUsername, parseAdminLoginBody } from "./adminAuth";
 
 import { getPool, sql } from "./db"; // MSSQL connection (for tutoring club data)
 import { pgQuery } from "./pg"; // Neon/Postgres query helper (for flags + bug reports)
@@ -692,32 +693,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/admin/login", async (req, res) => {
     try {
-      const { email, password } = req.body || {};
-      if (!email || !password) return res.status(400).json({ message: "email and password are required" });
+      const { username, password } = parseAdminLoginBody(req.body);
+      if (!username || !password) {
+        return res.status(400).json({ message: "username (or legacy email) and password are required" });
+      }
 
-      const pool = await getPool();
-      const q = pool.request();
-      q.input("email", sql.VarChar(256), String(email).trim());
-      q.input("pwd", sql.VarChar(256), String(password)); // NOTE: legacy plain-text
+      const auth = await authenticateAdminByUsername(username, password);
+      if (!auth) return res.status(401).json({ message: "Invalid credentials" });
 
-      const rs = await q.query(`
-        SELECT TOP 1
-          U.Email        AS AdminEmail,
-          F.ID           AS FranchiseID
-        FROM dbo.tblUsers AS U
-        LEFT JOIN dpinkney_TC.dbo.tblFranchies AS F
-          ON F.FranchiesEmail = U.Email
-        WHERE U.Email = @email COLLATE SQL_Latin1_General_CP1_CI_AS
-          AND U.[Password] = @pwd
-      `);
-
-      if (!rs.recordset.length) return res.status(401).json({ message: "Invalid credentials" });
-
-      const row = rs.recordset[0];
-      const adminEmail = String(row.AdminEmail || "").trim();
-      const franchiseId = row.FranchiseID != null ? String(row.FranchiseID) : "";
-
-      if (!franchiseId) return res.status(401).json({ message: "No franchise mapping for this admin email" });
+      const { adminEmail, franchiseId } = auth;
 
       req.session.adminEmail = adminEmail;
       req.session.adminFranchiseId = franchiseId;
