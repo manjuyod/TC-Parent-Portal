@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import logoPath from "@assets/logo_1755332058201.webp";
 import scheduleIconPath from "@assets/tcScheduleIcon_1755332058202.jpg";
+import { shouldShowInRecentSessions } from "@/lib/sessionFilters";
 import {
   type BillingColumnVisibility,
   type UiPolicy,
@@ -83,6 +84,7 @@ type DashboardSession = {
   Day?: string | null;
   TimeID?: number | null;
   Time?: string | null;
+  Attendance?: string | null;
 };
 
 type BillingAccountRow = {
@@ -360,6 +362,7 @@ export default function Dashboard() {
         const d = parseSessionDate(s);
         return d !== null && d < today && d >= thirtyDaysAgo;
       })
+      .filter(shouldShowInRecentSessions)
       .sort((a, b) => sessionSortKey(b) - sessionSortKey(a))
       .slice(0, 5);
   }, [sessionsForSelected]);
