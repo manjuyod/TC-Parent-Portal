@@ -225,8 +225,11 @@ export async function getSessions(studentId: number | string) {
         CAST(s.ScheduleDate AS date) AS ScheduleDateDate,
         CONVERT(varchar(10), CAST(s.ScheduleDate AS date), 23) AS ScheduleDateISO, -- 'YYYY-MM-DD'
         s.Day AS DayRaw,
-        s.TimeID
+        s.TimeID,
+        a.Attendance AS Attendance
       FROM dpinkney_TC.dbo.tblSessionSchedule AS s
+      LEFT JOIN dpinkney_TC.dbo.tblAttendance AS a
+        ON s.ID = a.MSID
       WHERE s.StudentId1 = @sid
       ORDER BY CAST(s.ScheduleDate AS date) ASC, s.TimeID ASC
     `);
@@ -250,6 +253,7 @@ export async function getSessions(studentId: number | string) {
           Day: day ?? null,
           TimeID: row.TimeID,
           Time: timeStr ?? "Unknown",
+          Attendance: row.Attendance ?? null,
           category: !isNaN(d.getTime()) && d < new Date() ? "recent" : "upcoming",
           FormattedDate: !isNaN(d.getTime())
             ? d.toLocaleDateString("en-US", {
